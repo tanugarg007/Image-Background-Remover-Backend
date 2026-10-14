@@ -5,6 +5,8 @@ import Router from "./router/approuter";
 import { connectDB } from "./config/db";
 
 const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 const corsOptions = {
     origin: "*", // Allow requests from any origin
@@ -13,9 +15,6 @@ const corsOptions = {
 };
 app.use(cors(corsOptions)); 
 app.use("/users", Router);
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (_req, res) => {
     res.json({ message: "Hello, World!" });

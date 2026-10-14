@@ -1,8 +1,6 @@
 
 import { Request, Response } from "express";
-import {
-  removeBackground as removeImageBackground,
-} from "@imgly/background-removal-node";
+import {removeBackground as removeImageBackground} from "@imgly/background-removal-node";
 
 export const removeBackground = async (
   req: Request,
