@@ -15,6 +15,7 @@ export interface IImageCropper extends Document {
   cropWidth: number;
   cropHeight: number;
   aspectRatio: string;
+  createdAt: Date;
 }
 
 const imageCropperSchema = new Schema<IImageCropper>(
@@ -25,7 +26,7 @@ const imageCropperSchema = new Schema<IImageCropper>(
     originalFormat: { type: String, required: true, trim: true },
     croppedFormat: { type: String, required: true, trim: true },
     originalSize: { type: Number, required: true, min: 1 },
-    croppedSize: { type: Number, required: true, min: 1 },
+    croppedSize: { type: Number, required: true, min: 0 },
     width: { type: Number, required: true, min: 1 },
     height: { type: Number, required: true, min: 1 },
     cropX: { type: Number, required: true, min: 0 },

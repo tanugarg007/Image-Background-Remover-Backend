@@ -8,10 +8,10 @@ export interface IBulkImageItem {
   originalSize: number;
   originalImageUrl?: string;
   convertedFileName?: string;
-  processedFileName?: string;
-  processedImageUrl?: string;
   convertedFormat?: string;
   convertedSize?: number;
+  processedImageUrl?: string;
+  processedFileName?: string;
   width?: number;
   height?: number;
   quality?: number;
@@ -35,10 +35,10 @@ const bulkImageItemSchema = new Schema<IBulkImageItem>(
     originalSize: { type: Number, required: true, min: 1 },
     originalImageUrl: { type: String, trim: true },
     convertedFileName: { type: String, trim: true },
-    processedFileName: { type: String, trim: true },
-    processedImageUrl: { type: String, trim: true },
     convertedFormat: { type: String, trim: true },
     convertedSize: { type: Number, min: 0 },
+    processedImageUrl: { type: String, trim: true },
+    processedFileName: { type: String, trim: true },
     width: { type: Number, min: 1 },
     height: { type: Number, min: 1 },
     quality: { type: Number, min: 10, max: 100 },
@@ -65,14 +65,9 @@ const bulkImageSchema = new Schema<IBulkImage>(
       },
     },
     totalImages: { type: Number, required: true, min: 1 },
-    status: {
-      type: String,
-      enum: ["pending", "completed", "failed"],
-      default: "completed",
-      required: true,
-    },
-    successCount: { type: Number, required: true, min: 0, default: 0 },
-    failedCount: { type: Number, required: true, min: 0, default: 0 },
+    status: { type: String, enum: ["pending", "completed", "failed"], default: "completed" },
+    successCount: { type: Number, min: 0, default: 0 },
+    failedCount: { type: Number, min: 0, default: 0 },
   },
   { timestamps: true }
 );
