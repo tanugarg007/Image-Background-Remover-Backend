@@ -13,4 +13,4 @@ RUN npm run build
 
 EXPOSE 4000
 
-CMD ["npm", "start"]
+CMD ["node", "--max-old-space-size=384", "build/index.js"]
