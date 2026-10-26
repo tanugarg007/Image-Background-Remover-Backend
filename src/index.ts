@@ -7,22 +7,16 @@ import { connectDB } from "./config/db";
 
 const app = express();
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://image-background-remover-frontend-z.vercel.app",
-  "https://image-background-remover-frontend-zakg-59xuf6dbz.vercel.app",
-  "https://image-background-rem-git-8d3a75-tanisha-gargs-projects-ccf7060f.vercel.app",
-];
-
 app.use(
   cors({
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    origin: [
+      "https://image-background-remover-frontend-z.vercel.app",
+      "http://localhost:5173",
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

@@ -6,7 +6,7 @@
   "scripts": {
    
     "build": "tsc",
-    "start": "node build/index.js",
+    "start": "npm run build && node build/index.js",
     "dev": "nodemon --exec \"ts-node --transpile-only\" src/index.ts"
   },
   "keywords": [],

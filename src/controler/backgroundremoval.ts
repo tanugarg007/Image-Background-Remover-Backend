@@ -51,6 +51,10 @@ export const removeBackground = async (
     const result = await removeImageBackground(imageBlob, {
       model: "small",
       output: { format: "image/png" },
+      progress: (key, current, total) => {
+        const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+        console.log(`[Background] ${key}: ${percent}%`);
+      },
     });
 
     console.log("[Background] Processing completed");
