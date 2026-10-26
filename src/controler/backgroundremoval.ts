@@ -1,13 +1,12 @@
 
 import { Request, Response } from "express";
 import { createReadStream } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   removeBackground as removeImageBackground,
 } from "@imgly/background-removal-node";
-import fs from "node:fs/promises";
-import path from "node:path";
 
-// Folder where processed images will be saved
 const outputDir = path.resolve(
   process.cwd(),
   "uploads",
@@ -19,10 +18,25 @@ export const removeBackground = async (
   req: Request,
   res: Response
 ): Promise<void> => {
+  console.log("[Background] Request received");
+
   try {
     if (!req.file) {
+      console.warn("[Background] No image uploaded");
       res.status(400).json({
         message: "Please upload an image.",
+      });
+      return;
+    }
+
+    console.log("[Background] Image received:", {
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+    });
+
+    if (!req.file.mimetype.startsWith("image/")) {
+      res.status(400).json({
+        message: "Please upload a valid image.",
       });
       return;
     }
@@ -32,10 +46,14 @@ export const removeBackground = async (
       { type: req.file.mimetype }
     );
 
+    console.log("[Background] Starting image processing");
+
     const result = await removeImageBackground(imageBlob, {
-      model: "medium",
+      model: "small",
       output: { format: "image/png" },
     });
+
+    console.log("[Background] Processing completed");
 
     const outputBuffer = Buffer.from(
       await result.arrayBuffer()
@@ -43,7 +61,6 @@ export const removeBackground = async (
 
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Unique filename to avoid overwriting files
     const filename = `background-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}.png`;
@@ -52,6 +69,8 @@ export const removeBackground = async (
 
     await fs.writeFile(filePath, outputBuffer);
 
+    console.log("[Background] File saved:", filename);
+
     res.status(200).json({
       success: true,
       message: "Background removed successfully.",
@@ -59,15 +78,17 @@ export const removeBackground = async (
       downloadUrl: `/users/backgrounddownload/${filename}`,
     });
   } catch (error: unknown) {
-    console.error("Background removal failed:", error);
+    console.error("[Background] Processing failed:", error);
 
-    res.status(500).json({
-      message: "Background removal failed.",
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error),
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: "Background removal failed.",
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      });
+    }
   }
 };
 
@@ -77,11 +98,12 @@ export const backgrounddownload = async (
   res: Response
 ): Promise<void> => {
   try {
-    const filename = Array.isArray(req.params.filename)
-      ? req.params.filename[0]
-      : req.params.filename;
+   const rawFilename = req.params.filename;
 
-    // Accept only generated PNG filenames
+const filename = Array.isArray(rawFilename)
+  ? rawFilename[0]
+  : rawFilename;
+
     if (
       !filename ||
       !/^background-[a-zA-Z0-9-]+\.png$/.test(filename)
@@ -94,8 +116,10 @@ export const backgrounddownload = async (
 
     const filePath = path.join(outputDir, filename);
 
+    let fileStats;
+
     try {
-      await fs.access(filePath);
+      fileStats = await fs.stat(filePath);
     } catch {
       res.status(404).json({
         message: "Processed image not found.",
@@ -103,27 +127,32 @@ export const backgrounddownload = async (
       return;
     }
 
-    const fileStats = await fs.stat(filePath);
     res.status(200);
-    res.setHeader("Content-Type", "image/png,jpg,webp,jpeg");
+    res.setHeader("Content-Type", "image/png");
     res.setHeader("Content-Length", fileStats.size);
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`
+    );
+    res.setHeader("Cache-Control", "no-store");
 
     const imageStream = createReadStream(filePath);
+
     imageStream.on("error", (error) => {
-      console.error("Download failed:", error);
+      console.error("[Download] Stream failed:", error);
+
       if (!res.headersSent) {
-        res.status(500).json({ message: "Unable to download image." });
+        res.status(500).json({
+          message: "Unable to download image.",
+        });
       } else {
         res.destroy(error);
       }
     });
+
     imageStream.pipe(res);
   } catch (error: unknown) {
-    console.error("Download failed:", error);
+    console.error("[Download] Failed:", error);
 
     if (!res.headersSent) {
       res.status(500).json({
