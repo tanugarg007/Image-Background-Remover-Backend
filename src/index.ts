@@ -13,7 +13,7 @@ app.use(
       "http://localhost:5174",
       "https://image-background-remover-frontend-z.vercel.app",
     ],
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST",  "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );

@@ -163,7 +163,7 @@ export const GetImageById = async (
   }
 };
 
-// PUT: Update saved image details
+// PATCH: Update saved image details
 export const UpdateImage = async (
   req: Request,
   res: Response

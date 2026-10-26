@@ -62,13 +62,13 @@ router.get('/download', DownloadAll)
 router.post("/analyze-image",upload.single("image"),AnalyzeImage);
 router.get("/analyze-image", GetImages);
 router.get("/analyze-image/:id", GetImageById);
-router.put("/analyze-image/:id", UpdateImage);
+router.patch("/analyze-image/:id", UpdateImage);
 router.delete("/analyze-image/:id", DeleteImage);
 
 router.post("/compress-image", upload.single('image'), createImageControl);
 router.get("/compress-image", getImageControls);
 router.get("/compress-image/:id", getImageControlById);
-router.put("/compress-image/:id", updateImageControl);
+router.patch("/compress-image/:id", updateImageControl);
 router.delete("/compress-image/:id", deleteImageControl);
 
 router.get("/download-image/:id", downloadImage);
@@ -77,4 +77,5 @@ router.get('/getdownload',GetDownloadHistory )
 router.get('/getdownload/:id',GetDownloadById)
 router.patch("/updatedownload/:id",UpdateDownload)
 router.delete('/deleted/:id',DeleteDownload)
+
 export default router;
