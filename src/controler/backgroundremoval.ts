@@ -105,7 +105,7 @@ export const backgrounddownload = async (
 
     const fileStats = await fs.stat(filePath);
     res.status(200);
-    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Content-Type", "image/png,jpg,webp,jpeg");
     res.setHeader("Content-Length", fileStats.size);
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");

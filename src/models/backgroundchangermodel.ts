@@ -1,22 +1,19 @@
-import mongoose, { Document, Schema } from "mongoose";
+import mongoose, { Schema, Document } from "mongoose";
 
 export interface IBackgroundChanger extends Document {
   originalFileName: string;
   outputFileName: string;
   imagePath: string;
   selectedColor: string;
+  createdAt: Date;
 }
 
 const backgroundChangerSchema = new Schema<IBackgroundChanger>(
   {
-    originalFileName: { type: String, required: true, trim: true },
-    outputFileName: { type: String, required: true, trim: true },
-    imagePath: { type: String, required: true, trim: true },
-    selectedColor: {
-      type: String,
-      required: true,
-      match: /^#[0-9a-fA-F]{6}$/,
-    },
+    originalFileName: { type: String, required: true },
+    outputFileName: { type: String, required: true },
+    imagePath: { type: String, required: true },
+    selectedColor: { type: String, required: true },
   },
   { timestamps: true }
 );

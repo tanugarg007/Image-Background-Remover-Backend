@@ -45,7 +45,7 @@ export const saveBackground = async (
 
     const requestedName = path.parse(path.basename(String(req.body.originalFileName || "image"))).name;
     const record = await BackgroundChanger.create({
-      originalFileName: String(req.body.originalFileName || "image"),
+      originalFileName: String(req.body.originalFileName || "image/png,jpg,jpeg,webp"),
       outputFileName: `${requestedName}-background.png`,
       imagePath: path.join("uploads", "background-changer", outputFileName),
       selectedColor,
@@ -67,6 +67,7 @@ export const saveBackground = async (
   }
 };
 
+
 export const downloadBackground = async (
   req: Request,
   res: Response
@@ -82,22 +83,31 @@ export const downloadBackground = async (
       return;
     }
 
-    const filePath = path.join(backgroundImagesDir, path.basename(record.imagePath));
+    const filePath = path.join(
+      backgroundImagesDir,
+      path.basename(record.imagePath)
+    );
 
-    res.download(filePath, record.outputFileName, (error) => {
-      if (error && !res.headersSent) {
-        res.status(404).json({
-          success: false,
-          message: "Image file not found.",
-        });
+    res.download(
+      filePath,
+      record.outputFileName,
+      (error?: Error) => {
+        if (error && !res.headersSent) {
+          res.status(404).json({
+            success: false,
+            message: "Image file not found.",
+          });
+        }
       }
-    });
+    );
   } catch (error) {
     console.error("Download background error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Could not download image.",
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: "Could not download image.",
+      });
+    }
   }
 };

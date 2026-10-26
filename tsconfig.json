@@ -9,7 +9,8 @@
     // See also https://aka.ms/tsconfig/module
     "module": "nodenext",
     "target": "esnext",
-    "types": [],
+    // Allow TypeScript to load installed @types packages such as Express,
+    // Multer, and Node.js.
     // For nodejs:
     // "lib": ["esnext"],
     // "types": ["node"],

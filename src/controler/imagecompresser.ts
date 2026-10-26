@@ -1,11 +1,17 @@
 import { Request, Response } from "express";
 import path from "node:path";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import ImageCompressor from "../models/imagecompressermodel";
+
+const compressedImagesDir = path.resolve(process.cwd(), "uploads", "compressed-images");
 
 export const Imagecompressor = async (
   req: Request,
   res: Response
 ): Promise<void> => {
+  let savedFilePath: string | undefined;
+  let recordId: string | undefined;
   try {
     if (!req.file) {
       res.status(400).json({ message: "Please upload an image." });
@@ -20,24 +26,48 @@ export const Imagecompressor = async (
       originalSize,
     } = req.body;
 
+    const qualityValue = Number(quality);
+    const widthValue = Number(width);
+    const heightValue = Number(height);
+    const originalSizeValue = Number(originalSize);
+    if (!url || !Number.isInteger(qualityValue) || qualityValue < 1 || qualityValue > 100 ||
+      !Number.isFinite(widthValue) || widthValue < 1 || !Number.isFinite(heightValue) || heightValue < 1 ||
+      !Number.isFinite(originalSizeValue) || originalSizeValue < 0) {
+      res.status(400).json({ message: "Please provide valid compression details." });
+      return;
+    }
+
+    await mkdir(compressedImagesDir, { recursive: true });
+    const storedFileName = `${randomUUID()}${path.extname(req.file.originalname) || ".jpg"}`;
+    savedFilePath = path.join(compressedImagesDir, storedFileName);
+    await writeFile(savedFilePath, req.file.buffer);
+
     const image = await ImageCompressor.create({
       url,
-      compressedUrl: req.file.filename,
-      quality: Number(quality),
-      width: Number(width),
-      height: Number(height),
-      originalSize: Number(originalSize),
+      compressedUrl: storedFileName,
+      quality: qualityValue,
+      width: widthValue,
+      height: heightValue,
+      originalSize: originalSizeValue,
       compressedSize: req.file.size,
-      reducedSize: Number(originalSize) - req.file.size,
+      reducedSize: Math.max(0, originalSizeValue - req.file.size),
     });
+    recordId = String(image._id);
 
     res.status(201).json({
       message: "Image saved successfully.",
-      id: image._id,
+      data: image,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Failed to save image." });
+    if (savedFilePath) await unlink(savedFilePath).catch(() => undefined);
+    if (recordId) await ImageCompressor.findByIdAndDelete(recordId).catch(() => undefined);
+    console.error("Failed to save compressed image:", error);
+    res.status(500).json({
+      message: "Failed to save compressed image.",
+      ...(process.env.NODE_ENV !== "production" && {
+        detail: error instanceof Error ? error.message : String(error),
+      }),
+    });
   }
 };
 
@@ -54,7 +84,7 @@ export const downloadCompressedImage = async (
     }
 
     const filePath = path.resolve(
-      "uploads/compressed-images",
+      compressedImagesDir,
       path.basename(image.compressedUrl)
     );
 

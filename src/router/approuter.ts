@@ -37,32 +37,40 @@ const uploadAnalyzerImage = (req: express.Request, res: express.Response, next: 
 };
 
 router.post("/image-analyzer", uploadAnalyzerImage, AnalyzeImage);
+
 router.post( "/remove-background", upload.single("image"), removeBackground);
 router.get('/backgrounddownload/:filename', backgrounddownload )
+
 router.post("/image-converter",upload.single("image"),ImageConverter);
 router.get('/downloadconverter/:id', downloadimage)
+
 router.post('/image-compresser', upload.single('image'), Imagecompressor)
 router.get('/downloadimage/:id', downloadCompressedImage)
 router.post('/savebackground',upload.single('image'), saveBackground)
 router.get('/downloadbackground/:id', downloadBackground)
+
 router.post('/image-cropper', upload.single('image'), saveCroppedImage)
 router.get('/downloadcropper/:id', downloadCroppedImage)
+
 router.post('/bulkimage', upload.single('image'), Bulkimage)
 router.get('/bulkimages', GetBulkImages)
 router.patch('/bulkimage/:id',upload.single('image'), UpdateBulkImage)
 router.delete('/bulkimage/:id', DeleteBulkImage)
 router.get('/downloadbulk/:id', DownloadBulkImage)
 router.get('/download', DownloadAll)
+
 router.post("/analyze-image",upload.single("image"),AnalyzeImage);
 router.get("/analyze-image", GetImages);
 router.get("/analyze-image/:id", GetImageById);
 router.put("/analyze-image/:id", UpdateImage);
 router.delete("/analyze-image/:id", DeleteImage);
+
 router.post("/compress-image", upload.single('image'), createImageControl);
 router.get("/compress-image", getImageControls);
 router.get("/compress-image/:id", getImageControlById);
 router.put("/compress-image/:id", updateImageControl);
 router.delete("/compress-image/:id", deleteImageControl);
+
 router.get("/download-image/:id", downloadImage);
 router.post("/downloadzip", upload.array("files", 20), DownloadZip);
 router.get('/getdownload',GetDownloadHistory )
