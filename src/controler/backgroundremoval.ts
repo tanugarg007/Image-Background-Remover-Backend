@@ -117,20 +117,17 @@ export const removeBackground = async (
       filename,
       downloadUrl: `/users/backgrounddownload/${filename}`,
     });
-  } catch (error: unknown) {
-    console.error("[Background] Processing failed:", error);
+  } catch (error) {
+  console.error("[Background] Processing failed:", error);
 
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        message: "Background removal failed.",
-        error:
-          error instanceof Error
-            ? error.message
-            : String(error),
-      });
-    }
+  if (!res.headersSent) {
+    res.status(500).json({
+      success: false,
+      message: "Background removal failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
+}
 };
 
 // 2. Download processed PNG
