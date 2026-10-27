@@ -9,6 +9,7 @@ const app = express();
 
 const allowedOrigins = [
   "https://image-background-remover-frontend-z.vercel.app",
+  "https://image-background-remover-frontend-zakg-oiyjgd54e.vercel.app",
   "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
   "https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
   "https://image-background-remover-frontend-zakg-9e5hus6pw.vercel.app",
@@ -17,16 +18,30 @@ const allowedOrigins = [
   "http://localhost:5174",
 ];
 
+const isAllowedOrigin = (origin: string): boolean => {
+  if (allowedOrigins.includes(origin)) return true;
+
+  // Vercel assigns a new hostname to each preview deployment. Accept previews
+  // belonging to this frontend project while keeping unrelated Vercel apps out.
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return protocol === "https:" &&
+      /^image-background-remover-frontend-zakg-[a-z0-9-]+\.vercel\.app$/i.test(hostname);
+  } catch {
+    return false;
+  }
+};
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS blocked origin: ${origin}`));
       }
     },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT","PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
