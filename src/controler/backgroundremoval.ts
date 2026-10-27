@@ -56,17 +56,15 @@ export const removeBackground = async (
     // Resize image to reduce memory usage
     console.log("[Background] Resizing input image");
 
-    const resizedBuffer = await sharp(req.file.buffer, {
-      limitInputPixels: 40000000,
-    })
-      .rotate()
+    const resizedBuffer = await sharp(req.file.buffer)
+      
       .resize({
         width: 512,
         height: 512,
         fit: "inside",
         withoutEnlargement: true,
       })
-      .jpeg({ quality: 85 })
+      .jpeg({ quality: 75 })
       .toBuffer();
 
     const imageBlob = new Blob(
