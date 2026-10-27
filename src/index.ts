@@ -12,6 +12,7 @@ const allowedOrigins = [
   "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
   "https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
   "https://image-background-remover-frontend-zakg-9e5hus6pw.vercel.app",
+    "https://image-background-rem-git-8d3a75-tanisha-gargs-projects-ccf7060f.vercel.app",
   "http://localhost:5173",
   "http://localhost:5174",
 ];
