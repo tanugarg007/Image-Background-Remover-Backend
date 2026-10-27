@@ -10,6 +10,7 @@ const app = express();
 const allowedOrigins = [
   "https://image-background-remover-frontend-z.vercel.app",
   "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
+"https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
   "http://localhost:5173",
 ];
 
