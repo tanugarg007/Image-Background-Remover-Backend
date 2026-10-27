@@ -20,8 +20,10 @@ export const removeBackground = async (
   res: Response
 ): Promise<void> => {
   console.log("[Background] Request received");
-
+   
   try {
+    console.log("[Background] Controller reached");
+     console.log("[Background] File received:", req.file?.originalname);
     if (!req.file) {
       res.status(400).json({
         success: false,
@@ -43,7 +45,7 @@ export const removeBackground = async (
       });
       return;
     }
-
+      
     // Limit upload size to 10 MB
     if (req.file.size > 10 * 1024 * 1024) {
       res.status(413).json({

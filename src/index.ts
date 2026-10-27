@@ -7,11 +7,15 @@ import { connectDB } from "./config/db";
 
 const app = express();
 
+
 const allowedOrigins = [
   "https://image-background-remover-frontend-z.vercel.app",
   "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
-"https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
+  "https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
+  "https://image-background-rem-git-8d3a75-tanisha-gargs-projects-ccf7060f.vercel.app",
+  "https://image-background-remover-frontend-zakg-3gw4r381w.vercel.app",
   "http://localhost:5173",
+  "http://localhost:5174",
 ];
 
 app.use(
@@ -20,6 +24,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.error("CORS blocked origin:", origin);
         callback(new Error(`CORS blocked origin: ${origin}`));
       }
     },
@@ -27,12 +32,20 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.get("/ping", (_req, res) => {
   res.status(200).send("PING WORKING");
 });
+
+app.use("/users", (req, res, next) => {
+  console.log("[REQUEST RECEIVED]", req.method, req.originalUrl);
+  next();
+});
+
+
 
 app.use("/users", Router);
 
