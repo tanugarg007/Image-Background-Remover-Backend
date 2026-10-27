@@ -11,7 +11,12 @@ import { AnalyzeImage,GetImageById,GetImages,UpdateImage,DeleteImage } from "../
 import {createImageControl,getImageControls,getImageControlById, updateImageControl, deleteImageControl,downloadImage} from "../controler/imagequalitycontrol";
 import { DeleteDownload, DownloadZip, GetDownloadById, GetDownloadHistory, UpdateDownload } from "../controler/downloadzip";
 const router = express.Router();
-
+router.get("/", (_req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Users API is running",
+  });
+});
 const upload = multer({
   storage: multer.memoryStorage(),
  
@@ -38,7 +43,7 @@ const uploadAnalyzerImage = (req: express.Request, res: express.Response, next: 
 
 router.post("/image-analyzer", uploadAnalyzerImage, AnalyzeImage);
 
-router.post( "/remove-background", upload.single("image"), removeBackground);
+router.post("/remove-background", upload.single("image"), removeBackground);
 router.get('/backgrounddownload/:filename', backgrounddownload )
 
 router.post("/image-converter",upload.single("image"),ImageConverter);
