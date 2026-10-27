@@ -26,8 +26,10 @@ const isAllowedOrigin = (origin: string): boolean => {
   // belonging to this frontend project while keeping unrelated Vercel apps out.
   try {
     const { protocol, hostname } = new URL(origin);
-    return protocol === "https:" &&
-      /^image-background-remover-frontend-zakg-[a-z0-9-]+\.vercel\.app$/i.test(hostname);
+   return (
+  protocol === "https:" &&
+  /^image-background-remover-frontend-[a-z0-9-]+\.vercel\.app$/i.test(hostname)
+);
   } catch {
     return false;
   }
@@ -36,13 +38,18 @@ const isAllowedOrigin = (origin: string): boolean => {
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || isAllowedOrigin(origin)) {
+      if (
+        !origin ||
+        origin === "http://localhost:5173" ||
+        origin === "http://localhost:5174" ||
+        /^https:\/\/image-background-remover-frontend(-[a-z0-9]+)?\.vercel\.app$/.test(origin)
+      ) {
         callback(null, true);
       } else {
         callback(new Error(`CORS blocked origin: ${origin}`));
       }
     },
-    methods: ["GET", "POST", "PUT","PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
