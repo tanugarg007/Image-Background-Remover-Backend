@@ -5,6 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src",
     "start": "npm run build && node build/index.js",
     "dev": "nodemon --exec \"ts-node --transpile-only\" src/index.ts"
   },

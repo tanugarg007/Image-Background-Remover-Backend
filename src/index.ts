@@ -13,8 +13,8 @@ const allowedOrigins = [
   "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
   "https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
   "https://image-background-remover-frontend-zakg-9e5hus6pw.vercel.app",
-    "https://image-background-rem-git-8d3a75-tanisha-gargs-projects-ccf7060f.vercel.app",
-    "https://image-background-remover-frontend-bhl2rn2z7.vercel.app",
+  "https://image-background-rem-git-8d3a75-tanisha-gargs-projects-ccf7060f.vercel.app",
+  "https://image-background-remover-frontend-bhl2rn2z7.vercel.app",
   "http://localhost:5173",
   "http://localhost:5174",
 ];
@@ -26,9 +26,9 @@ const isAllowedOrigin = (origin: string): boolean => {
 
     return (
       protocol === "https:" &&
-      hostname.endsWith(".vercel.app") &&
-      hostname.startsWith("image-background-remover-frontend-")
-      
+      /^image-background-remover-frontend-zakg-[a-z0-9-]+\.vercel\.app$/i.test(
+        hostname
+      )
     );
   } catch {
     return false;
@@ -38,12 +38,7 @@ const isAllowedOrigin = (origin: string): boolean => {
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (
-        !origin ||
-        origin === "http://localhost:5173" ||
-        origin === "http://localhost:5174" ||
-        /^https:\/\/image-background-remover-frontend(-[a-z0-9]+)?\.vercel\.app$/.test(origin)
-      ) {
+      if (!origin || isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS blocked origin: ${origin}`));

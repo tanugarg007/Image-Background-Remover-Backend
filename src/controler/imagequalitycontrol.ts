@@ -144,7 +144,7 @@ export const getImageControls = async (
       count: records.length,
       data: records,
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       message: "Failed to fetch compression history.",
@@ -179,7 +179,7 @@ export const getImageControlById = async (
     }
     res.set("Cache-Control", "no-store");
     res.status(200).json({ success: true, data: record });
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       message: "Failed to fetch compression record.",
@@ -379,7 +379,7 @@ export const deleteImageControl = async (
       success: true,
       message: "Compression record deleted successfully.",
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       message: "Failed to delete compression record.",
@@ -431,7 +431,7 @@ export const downloadImage = async (
       filePath,
       `${path.parse(record.imageName).name}-optimized.${extension}`
     );
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       message: "Unable to download image.",

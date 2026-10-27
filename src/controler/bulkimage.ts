@@ -115,7 +115,7 @@ export const DownloadBulkImage = async (
       filePath,
       processedImage.processedFileName || processedImage.convertedFileName || "image"
     );
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       message: "Download failed",
@@ -133,7 +133,7 @@ export const DownloadAll = async (
       success: false,
       message: "Bulk ZIP download is not configured",
     });
-  } catch (error) {
+  } catch {
     if (!res.headersSent) {
       res.status(500).json({
         success: false,
