@@ -61,8 +61,8 @@ export const removeBackground = async (
     })
       .rotate()
       .resize({
-        width: 1024,
-        height: 1024,
+        width: 512,
+        height: 512,
         fit: "inside",
         withoutEnlargement: true,
       })
