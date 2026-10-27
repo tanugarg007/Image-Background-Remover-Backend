@@ -74,6 +74,12 @@ export const removeBackground = async (
 
     console.log("[Background] Resized image size:", resizedBuffer.length);
     console.log("[Background] Starting image processing");
+    console.log("[Background] Memory before inference:", {
+  rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+  heapUsedMB: Math.round(
+    process.memoryUsage().heapUsed / 1024 / 1024
+  ),
+});
 
     // Remove background
     const result = await removeImageBackground(imageBlob, {
@@ -88,7 +94,12 @@ export const removeBackground = async (
     });
 
     console.log("[Background] Processing completed");
-
+    console.log("[Background] Memory after inference:", {
+  rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+  heapUsedMB: Math.round(
+    process.memoryUsage().heapUsed / 1024 / 1024
+  ),
+});
     // Convert result to Buffer
     const outputBuffer = Buffer.from(
       await result.arrayBuffer()
