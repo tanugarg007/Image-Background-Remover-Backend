@@ -18,18 +18,18 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
 ];
-
 const isAllowedOrigin = (origin: string): boolean => {
   if (allowedOrigins.includes(origin)) return true;
 
-  // Vercel assigns a new hostname to each preview deployment. Accept previews
-  // belonging to this frontend project while keeping unrelated Vercel apps out.
   try {
     const { protocol, hostname } = new URL(origin);
-   return (
-  protocol === "https:" &&
-  /^image-background-remover-frontend-[a-z0-9-]+\.vercel\.app$/i.test(hostname)
-);
+
+    return (
+      protocol === "https:" &&
+      hostname.endsWith(".vercel.app") &&
+      hostname.startsWith("image-background-remover-frontend-")
+      
+    );
   } catch {
     return false;
   }
