@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const loginSessionSchema = new mongoose.Schema(
+const sessionEntrySchema = new mongoose.Schema(
   {
     tokenHash: { type: String, required: true },
     expiresAt: { type: Date, required: true },
@@ -10,10 +10,16 @@ const loginSessionSchema = new mongoose.Schema(
 
 const loginSchema = new mongoose.Schema(
   {
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     passwordSalt: { type: String, required: true },
     passwordHash: { type: String, required: true },
-    sessions: { type: [loginSessionSchema], default: [] },
+    sessions: { type: [sessionEntrySchema], default: [] },
   },
   { timestamps: true }
 );
