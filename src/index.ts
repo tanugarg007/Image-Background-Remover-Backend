@@ -17,7 +17,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "https://image-background-remover-frontend-z.vercel.app",
-  "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
+ "https://image-background-remover-frontend-zakg-p69wak7g8.vercel.app"
 ];
 
 app.use(
