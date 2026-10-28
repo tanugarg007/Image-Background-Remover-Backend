@@ -14,12 +14,26 @@ const outputDir = path.resolve(
   "removed-backgrounds"
 );
 
+// ONNX inference is memory-intensive on small Render instances. Run only one
+// inference at a time so concurrent uploads cannot multiply peak memory use.
+let inferenceInProgress = false;
+
 // 1. Remove background and save PNG
 export const removeBackground = async (
   req: Request,
   res: Response
 ): Promise<void> => {
   console.log("[Background] Request received");
+
+  if (inferenceInProgress) {
+    res.setHeader("Retry-After", "10");
+    res.status(503).json({
+      success: false,
+      message: "Background removal is busy. Please retry in a few seconds.",
+    });
+    return;
+  }
+  inferenceInProgress = true;
    
   try {
     console.log("[Background] Controller reached");
@@ -138,6 +152,8 @@ export const removeBackground = async (
       error: error instanceof Error ? error.message : String(error),
     });
   }
+} finally {
+  inferenceInProgress = false;
 }
 };
 

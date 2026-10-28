@@ -7,28 +7,10 @@ import { connectDB } from "./config/db";
 
 const app = express();
 
-// This API does not use cookies or other credentialed requests, so allow
-// browser clients from any origin. This also ensures Express-generated error
-// responses include the CORS headers needed for the frontend to read them.
-
-
-// CORS configuration
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://image-background-remover-frontend-z.vercel.app",
- "https://image-background-remover-frontend-zakg-p69wak7g8.vercel.app"
-];
-
+// The API does not use cookies, so allow browser clients from any origin.
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Origin not allowed by CORS"));
-      }
-    },
+    origin: "*",
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -59,6 +41,34 @@ app.get("/", (_req, res) => {
     message: "Image Background Remover API is running",
   });
 });
+
+// Return JSON for errors raised by route middleware instead of Express's
+// default HTML error page.
+app.use(
+  (
+    error: unknown,
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    console.error("[API] Unhandled request error:", error);
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+
+    const statusCode =
+      typeof error === "object" && error !== null && "status" in error &&
+      typeof error.status === "number"
+        ? error.status
+        : 500;
+
+    res.status(statusCode).json({
+      success: false,
+      message: statusCode >= 500 ? "Internal server error." : "Request failed.",
+    });
+  }
+);
 
 const PORT = process.env.PORT || 4000;
 
