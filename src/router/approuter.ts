@@ -2,7 +2,7 @@
 import express from "express";
 import multer from "multer";
 import { backgrounddownload } from "../controler/backgroundremoval";
-import { currentUser, login, logout, register } from "../controler/auth";
+import { currentUser, login, logout, register } from "../controler/login";
 import {downloadCompressedImage, Imagecompressor} from '../controler/imagecompresser';
 import { downloadimage, ImageConverter } from "../controler/imageconverter";
 import { downloadBackground, saveBackground } from "../controler/backgroundchanger";
