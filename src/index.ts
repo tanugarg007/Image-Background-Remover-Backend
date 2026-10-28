@@ -10,7 +10,7 @@ const app = express();
 // This API does not use cookies or other credentialed requests, so allow
 // browser clients from any origin. This also ensures Express-generated error
 // responses include the CORS headers needed for the frontend to read them.
-import cors from "cors";
+
 
 // CORS configuration
 const allowedOrigins = [
