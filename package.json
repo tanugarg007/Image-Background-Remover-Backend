@@ -7,7 +7,7 @@
     "build": "tsc",
     "lint": "eslint src",
     "start": "npm run build && node build/index.js",
-    "dev": "nodemon --exec \"ts-node --transpile-only\" src/index.ts"
+    "dev": "nodemon --watch src --ext ts --exec \"ts-node --transpile-only\" src/index.ts"
   },
   "keywords": [],
   "author": "",
