@@ -83,9 +83,10 @@ const createSession = async (
   setSessionCookie(res, token, remember);
 };
 
-const userResponse = (user: { _id: unknown; email: string }) => ({
+const userResponse = (user: { _id: unknown; email: string; role?: string }) => ({
   id: String(user._id),
   email: user.email,
+  role: user.role || "user",
 });
 
 export const register = async (req: Request, res: Response): Promise<void> => {
@@ -200,7 +201,7 @@ export const currentUser = async (req: Request, res: Response): Promise<void> =>
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("email");
+    }).select("email role");
 
     if (!user) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });

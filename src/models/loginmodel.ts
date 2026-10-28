@@ -23,6 +23,11 @@ const loginSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    role: {
+      type: String,
+      default: "user",
+      trim: true,
+    },
     passwordSalt: {
       type: String,
       required: true,
