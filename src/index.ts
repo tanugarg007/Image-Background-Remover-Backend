@@ -6,11 +6,34 @@ import Router from "./router/approuter";
 import { connectDB } from "./config/db";
 
 const app = express();
+app.set("trust proxy", 1);
 
-// The API does not use cookies, so allow browser clients from any origin.
+const isAllowedOrigin = (origin: string): boolean => {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return (
+      (protocol === "http:" && ["localhost", "127.0.0.1"].includes(hostname)) ||
+      (protocol === "https:" &&
+        hostname.startsWith("image-background-remover-frontend-") &&
+        hostname.endsWith(".vercel.app"))
+    );
+  } catch {
+    return false;
+  }
+};
+
 app.use(
   cors({
-    origin: "*",
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+      } else if (isAllowedOrigin(origin)) {
+        callback(null, origin);
+      } else {
+        callback(new Error(`CORS blocked origin: ${origin}`));
+      }
+    },
+    credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -72,11 +95,16 @@ app.use(
 
 const PORT = process.env.PORT || 4000;
 
-app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const startServer = async (): Promise<void> => {
+  try {
+    await connectDB();
+    app.listen(Number(PORT), "0.0.0.0", () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  } catch (error: unknown) {
+    console.error("MongoDB connection failed:", error);
+    exit(1);
+  }
+};
 
-connectDB().catch((error: unknown) => {
-  console.error("MongoDB connection failed:", error);
-  exit(1);
-});
+void startServer();

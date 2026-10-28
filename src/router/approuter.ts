@@ -2,6 +2,7 @@
 import express from "express";
 import multer from "multer";
 import { backgrounddownload } from "../controler/backgroundremoval";
+import { currentUser, login, logout, register } from "../controler/auth";
 import {downloadCompressedImage, Imagecompressor} from '../controler/imagecompresser';
 import { downloadimage, ImageConverter } from "../controler/imageconverter";
 import { downloadBackground, saveBackground } from "../controler/backgroundchanger";
@@ -17,6 +18,12 @@ router.get("/", (_req, res) => {
     message: "Users API is running",
   });
 });
+
+router.post("/register", register);
+router.post("/login", login);
+router.get("/me", currentUser);
+router.post("/logout", logout);
+
 const upload = multer({
   storage: multer.memoryStorage(),
  
