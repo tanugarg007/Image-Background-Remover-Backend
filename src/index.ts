@@ -7,43 +7,12 @@ import { connectDB } from "./config/db";
 
 const app = express();
 
-const allowedOrigins = [
-  "https://image-background-remover-frontend-z.vercel.app",
-  "https://image-background-remover-frontend-zakg-oiyjgd54e.vercel.app",
-  "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
-  "https://image-background-remover-frontend-zakg-4f2nu5z7j.vercel.app",
-  "https://image-background-remover-frontend-zakg-9e5hus6pw.vercel.app",
-  "https://image-background-rem-git-8d3a75-tanisha-gargs-projects-ccf7060f.vercel.app",
-  "https://image-background-remover-frontend-bhl2rn2z7.vercel.app",
-  "http://localhost:5173",
-  "http://localhost:5174",
-];
-const isAllowedOrigin = (origin: string): boolean => {
-  if (allowedOrigins.includes(origin)) return true;
-
-  try {
-    const { protocol, hostname } = new URL(origin);
-
-    return (
-      protocol === "https:" &&
-      /^image-background-remover-frontend-zakg-[a-z0-9-]+\.vercel\.app$/i.test(
-        hostname
-      )
-    );
-  } catch {
-    return false;
-  }
-};
-
+// This API does not use cookies or other credentialed requests, so allow
+// browser clients from any origin. This also ensures Express-generated error
+// responses include the CORS headers needed for the frontend to read them.
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || isAllowedOrigin(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS blocked origin: ${origin}`));
-      }
-    },
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
