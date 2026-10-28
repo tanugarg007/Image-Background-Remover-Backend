@@ -10,10 +10,26 @@ const app = express();
 // This API does not use cookies or other credentialed requests, so allow
 // browser clients from any origin. This also ensures Express-generated error
 // responses include the CORS headers needed for the frontend to read them.
+import cors from "cors";
+
+// CORS configuration
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://image-background-remover-frontend-z.vercel.app",
+  "https://image-background-remover-frontend-zakg-ooqj53mhx.vercel.app",
+];
+
 app.use(
   cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Origin not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
