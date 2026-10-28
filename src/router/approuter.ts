@@ -22,6 +22,35 @@ const upload = multer({
  
 });
 
+const backgroundRemovalUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
+
+const uploadBackgroundRemovalImage = (
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  backgroundRemovalUpload.single("image")(req, res, (error: unknown) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    console.error("[Background] Upload middleware failed:", error);
+    const isTooLarge =
+      error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE";
+
+    res.status(isTooLarge ? 413 : 400).json({
+      success: false,
+      message: isTooLarge
+        ? "Image is too large. Please upload an image under 10 MB."
+        : "Could not read the uploaded image. Please upload one image using the 'image' field.",
+    });
+  });
+};
+
 const analyzerUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
@@ -43,7 +72,7 @@ const uploadAnalyzerImage = (req: express.Request, res: express.Response, next: 
 
 router.post("/image-analyzer", uploadAnalyzerImage, AnalyzeImage);
 
-router.post("/remove-background", upload.single("image"), removeBackground);
+router.post("/remove-background", uploadBackgroundRemovalImage, removeBackground);
 router.get('/backgrounddownload/:filename', backgrounddownload )
 
 router.post("/image-converter",upload.single("image"),ImageConverter);
