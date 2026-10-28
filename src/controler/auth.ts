@@ -1,8 +1,7 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { Request, Response } from "express";
 import { Types } from "mongoose";
-import AuthUserModel from "../models/authuser";
-import LoginSessionModel from "../models/loginsession";
+import LoginModel from "../models/loginmodel";
 
 const COOKIE_NAME = "citc_session";
 const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -70,11 +69,17 @@ const createSession = async (
 ): Promise<void> => {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + (remember ? REMEMBER_SESSION_MS : TEMP_SESSION_MS));
-  await LoginSessionModel.create({
-    userId,
-    tokenHash: hashSessionToken(token),
-    expiresAt,
-  });
+  const user = await LoginModel.findById(userId);
+  if (!user) throw new Error("Login account disappeared while creating a session.");
+
+  const now = new Date();
+  for (let index = user.sessions.length - 1; index >= 0; index -= 1) {
+    const session = user.sessions[index];
+    if (session && session.expiresAt <= now) user.sessions.splice(index, 1);
+  }
+  user.sessions.push({ tokenHash: hashSessionToken(token), expiresAt });
+  if (user.sessions.length > 10) user.sessions.splice(0, user.sessions.length - 10);
+  await user.save();
   setSessionCookie(res, token, remember);
 };
 
@@ -102,7 +107,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const validEmail = email as string;
     const validPassword = password as string;
     const normalizedEmail = validEmail.trim().toLowerCase();
-    const existingUser = await AuthUserModel.findOne({ email: normalizedEmail }).lean();
+    const existingUser = await LoginModel.findOne({ email: normalizedEmail }).lean();
     if (existingUser) {
       res.status(409).json({ success: false, message: "An account with this email already exists." });
       return;
@@ -110,7 +115,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const passwordSalt = randomBytes(16).toString("hex");
     const passwordHash = (await derivePasswordHash(validPassword, passwordSalt)).toString("hex");
-    const user = await AuthUserModel.create({ email: normalizedEmail, passwordSalt, passwordHash });
+    const user = await LoginModel.create({ email: normalizedEmail, passwordSalt, passwordHash });
     await createSession(user._id, res, remember === true);
 
     res.status(201).json({ success: true, user: userResponse(user) });
@@ -152,7 +157,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const validEmail = email as string;
     const validPassword = password as string;
     const normalizedEmail = validEmail.trim().toLowerCase();
-    const user = await AuthUserModel.findOne({ email: normalizedEmail });
+    const user = await LoginModel.findOne({ email: normalizedEmail });
     const suppliedHash = await derivePasswordHash(
       validPassword,
       user?.passwordSalt || DUMMY_SALT
@@ -188,17 +193,20 @@ export const currentUser = async (req: Request, res: Response): Promise<void> =>
   }
 
   try {
-    const session = await LoginSessionModel.findOne({
-      tokenHash: hashSessionToken(token),
-      expiresAt: { $gt: new Date() },
-    }).populate("userId", "email");
+    const user = await LoginModel.findOne({
+      sessions: {
+        $elemMatch: {
+          tokenHash: hashSessionToken(token),
+          expiresAt: { $gt: new Date() },
+        },
+      },
+    }).select("email");
 
-    if (!session || !session.userId || typeof session.userId !== "object" || !("email" in session.userId)) {
+    if (!user) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
       return;
     }
 
-    const user = session.userId as unknown as { _id: unknown; email: string };
     res.status(200).json({ success: true, user: userResponse(user) });
   } catch (error) {
     console.error("[Auth] Session lookup failed:", error);
@@ -212,7 +220,10 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
 
   if (token) {
     try {
-      await LoginSessionModel.deleteOne({ tokenHash: hashSessionToken(token) });
+      await LoginModel.updateOne(
+        { "sessions.tokenHash": hashSessionToken(token) },
+        { $pull: { sessions: { tokenHash: hashSessionToken(token) } } }
+      );
     } catch (error) {
       console.error("[Auth] Logout failed:", error);
       res.status(500).json({ success: false, message: "Could not sign out right now." });
