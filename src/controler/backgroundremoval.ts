@@ -1,5 +1,6 @@
 
 import { Request, Response } from "express";
+import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -14,66 +15,33 @@ const outputDir = path.resolve(
   "removed-backgrounds"
 );
 
-// ONNX inference is memory-intensive on small Render instances. Run only one
-// inference at a time so concurrent uploads cannot multiply peak memory use.
-let inferenceInProgress = false;
+type RemovalJob = {
+  id: string;
+  createdAt: number;
+  status: "processing" | "completed" | "failed";
+  filename?: string;
+  message?: string;
+};
 
-// 1. Remove background and save PNG
-export const removeBackground = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  console.log("[Background] Request received");
+const removalJobs = new Map<string, RemovalJob>();
+let activeRemovalJob: string | null = null;
+const JOB_TTL_MS = 30 * 60 * 1000;
 
-  if (inferenceInProgress) {
-    res.setHeader("Retry-After", "10");
-    res.status(503).json({
-      success: false,
-      message: "Background removal is busy. Please retry in a few seconds.",
-    });
-    return;
+const pruneExpiredJobs = (): void => {
+  const expiry = Date.now() - JOB_TTL_MS;
+  for (const [jobId, job] of removalJobs) {
+    if (job.createdAt < expiry) removalJobs.delete(jobId);
   }
-  inferenceInProgress = true;
-   
+};
+
+const processBackgroundRemoval = async (
+  jobId: string,
+  inputBuffer: Buffer,
+  createdAt: number
+): Promise<void> => {
   try {
-    console.log("[Background] Controller reached");
-     console.log("[Background] File received:", req.file?.originalname);
-    if (!req.file) {
-      res.status(400).json({
-        success: false,
-        message: "Please upload an image.",
-      });
-      return;
-    }
-
-    console.log("[Background] Image received:", {
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-    });
-
-    // Validate image type
-    if (!req.file.mimetype.startsWith("image/")) {
-      res.status(400).json({
-        success: false,
-        message: "Please upload a valid image.",
-      });
-      return;
-    }
-      
-    // Limit upload size to 10 MB
-    if (req.file.size > 10 * 1024 * 1024) {
-      res.status(413).json({
-        success: false,
-        message: "Image is too large. Please upload an image under 10 MB.",
-      });
-      return;
-    }
-
-    // Resize image to reduce memory usage
     console.log("[Background] Resizing input image");
-
-    const resizedBuffer = await sharp(req.file.buffer)
-      
+    const resizedBuffer = await sharp(inputBuffer)
       .resize({
         width: 512,
         height: 512,
@@ -83,78 +51,101 @@ export const removeBackground = async (
       .jpeg({ quality: 75 })
       .toBuffer();
 
-    const imageBlob = new Blob(
-      [new Uint8Array(resizedBuffer)],
-      { type: "image/jpeg" }
-    );
+    const imageBlob = new Blob([new Uint8Array(resizedBuffer)], {
+      type: "image/jpeg",
+    });
 
-    console.log("[Background] Resized image size:", resizedBuffer.length);
-    console.log("[Background] Starting image processing");
+    console.log("[Background] Starting inference for job:", jobId);
     console.log("[Background] Memory before inference:", {
-  rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
-  heapUsedMB: Math.round(
-    process.memoryUsage().heapUsed / 1024 / 1024
-  ),
-});
+      rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    });
 
-    // Remove background
     const result = await removeImageBackground(imageBlob, {
       model: "small",
       output: { format: "image/png" },
       progress: (key, current, total) => {
-        const percent =
-          total > 0 ? Math.round((current / total) * 100) : 0;
-
+        const percent = total > 0 ? Math.round((current / total) * 100) : 0;
         console.log(`[Background] ${key}: ${percent}%`);
       },
     });
 
-    console.log("[Background] Processing completed");
-    console.log("[Background] Memory after inference:", {
-  rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
-  heapUsedMB: Math.round(
-    process.memoryUsage().heapUsed / 1024 / 1024
-  ),
-});
-    // Convert result to Buffer
-    const outputBuffer = Buffer.from(
-      await result.arrayBuffer()
-    );
-
-    // Ensure output directory exists
+    const outputBuffer = Buffer.from(await result.arrayBuffer());
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Generate unique filename
     const filename = `background-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}.png`;
+    await fs.writeFile(path.join(outputDir, filename), outputBuffer);
 
-    const filePath = path.join(outputDir, filename);
-
-    // Save PNG
-    await fs.writeFile(filePath, outputBuffer);
-
-    console.log("[Background] File saved:", filename);
-
-    res.status(200).json({
-      success: true,
-      message: "Background removed successfully.",
-      filename,
-      downloadUrl: `/users/backgrounddownload/${filename}`,
+    removalJobs.set(jobId, { id: jobId, createdAt, status: "completed", filename });
+    console.log("[Background] Processing completed:", filename);
+    console.log("[Background] Memory after inference:", {
+      rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
     });
   } catch (error) {
-  console.error("[Background] Processing failed:", error);
-
-  if (!res.headersSent) {
-    res.status(500).json({
-      success: false,
-      message: "Background removal failed",
-      error: error instanceof Error ? error.message : String(error),
+    console.error("[Background] Processing failed:", error);
+    removalJobs.set(jobId, {
+      id: jobId,
+      createdAt,
+      status: "failed",
+      message: "Background removal failed. Please try a smaller image or retry.",
     });
+  } finally {
+    activeRemovalJob = null;
   }
-} finally {
-  inferenceInProgress = false;
-}
+};
+
+// 1. Remove background and save PNG
+export const removeBackground = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  console.log("[Background] Request received");
+  if (!req.file) {
+    res.status(400).json({ success: false, message: "Please upload an image." });
+    return;
+  }
+
+  if (!req.file.mimetype.startsWith("image/")) {
+    res.status(400).json({ success: false, message: "Please upload a valid image." });
+    return;
+  }
+
+  if (activeRemovalJob) {
+    res.setHeader("Retry-After", "10");
+    res.status(503).json({
+      success: false,
+      message: "Another image is being processed. Please retry shortly.",
+    });
+    return;
+  }
+
+  pruneExpiredJobs();
+  const jobId = randomUUID();
+  const createdAt = Date.now();
+  activeRemovalJob = jobId;
+  removalJobs.set(jobId, { id: jobId, createdAt, status: "processing" });
+
+  res.status(202).json({ success: true, jobId, status: "processing" });
+  void processBackgroundRemoval(jobId, req.file.buffer, createdAt);
+};
+
+export const backgroundRemovalStatus = (
+  req: Request,
+  res: Response
+): void => {
+  const rawJobId = req.params.jobId;
+  const jobId = Array.isArray(rawJobId) ? rawJobId[0] : rawJobId;
+  const job = jobId ? removalJobs.get(jobId) : undefined;
+
+  if (!job) {
+    res.status(404).json({ success: false, message: "Background-removal job not found." });
+    return;
+  }
+
+  res.status(200).json(job);
 };
 
 // 2. Download processed PNG

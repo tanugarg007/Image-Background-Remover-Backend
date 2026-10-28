@@ -1,7 +1,11 @@
 
 import express from "express";
 import multer from "multer";
-import { backgrounddownload, removeBackground } from "../controler/backgroundremoval";
+import {
+  backgrounddownload,
+  backgroundRemovalStatus,
+  removeBackground,
+} from "../controler/backgroundremoval";
 import {downloadCompressedImage, Imagecompressor} from '../controler/imagecompresser';
 import { downloadimage, ImageConverter } from "../controler/imageconverter";
 import { downloadBackground, saveBackground } from "../controler/backgroundchanger";
@@ -73,6 +77,7 @@ const uploadAnalyzerImage = (req: express.Request, res: express.Response, next: 
 router.post("/image-analyzer", uploadAnalyzerImage, AnalyzeImage);
 
 router.post("/remove-background", uploadBackgroundRemovalImage, removeBackground);
+router.get("/remove-background/:jobId", backgroundRemovalStatus);
 router.get('/backgrounddownload/:filename', backgrounddownload )
 
 router.post("/image-converter",upload.single("image"),ImageConverter);
