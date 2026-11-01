@@ -4,16 +4,17 @@
   "description": "",
   "main": "index.ts",
   "scripts": {
+    
     "build": "tsc",
-    "lint": "eslint src",
-    "start": "npm run build && node build/index.js",
-    "dev": "nodemon --watch src --ext ts --exec \"ts-node --transpile-only\" src/index.ts"
+    "start":"node build/index.js",
+    "dev": "nodemon --exec \"ts-node --transpile-only\" src/index.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
     "@types/cors": "^2.8.19",
     "@types/multer": "^2.3.0",
     "cors": "^2.8.6",
@@ -36,9 +37,5 @@
     "ts-node-dev": "^2.0.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1"
-  },
-  "allowScripts": {
-    "onnxruntime-node@1.17.3": true,
-    "sharp@0.32.6": true
   }
 }

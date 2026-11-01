@@ -23,10 +23,21 @@ const loginSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    name: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+    },
     role: {
       type: String,
       default: "user",
       trim: true,
+    },
+    status: {
+      type: String,
+      enum: ["active", "disabled"],
+      default: "active",
+      required: true,
     },
     passwordSalt: {
       type: String,

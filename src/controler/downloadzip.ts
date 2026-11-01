@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import JSZip from "jszip";
 import { DownloadOptions } from "../models/downloadzipmodel";
+import { getSessionUser } from "../midleware/sessionuser";
 
 export const DownloadZip = async (
   req: Request,
@@ -43,9 +44,11 @@ export const DownloadZip = async (
     });
 
     const zipName = `images-${Date.now()}.zip`;
+    const user = await getSessionUser(req);
 
     // Save download metadata in MongoDB
     await DownloadOptions.create({
+      ...(user ? { userId: new mongoose.Types.ObjectId(user.id), userEmail: user.email, userName: user.name, userRole: user.role } : { userEmail: "Guest", userName: "Guest", userRole: "guest" }),
       zipName,
       files: fileDetails,
       totalFiles: files.length,

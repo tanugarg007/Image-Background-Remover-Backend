@@ -9,6 +9,10 @@ interface IDownloadedFile {
 }
 
 export interface IDownloadOptions extends Document {
+  userId?: mongoose.Types.ObjectId;
+  userEmail?: string;
+  userName?: string;
+  userRole?: string;
   zipName: string;
   files: IDownloadedFile[];
   totalFiles: number;
@@ -18,6 +22,10 @@ export interface IDownloadOptions extends Document {
 
 const DownloadZipSchema = new Schema<IDownloadOptions>(
   {
+    userId: { type: Schema.Types.ObjectId, ref: "Login" },
+    userEmail: { type: String, trim: true },
+    userName: { type: String, trim: true },
+    userRole: { type: String, trim: true },
     zipName: {
       type: String,
       required: true,

@@ -2,6 +2,7 @@ import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { Request, Response } from "express";
 import { Types } from "mongoose";
 import LoginModel from "../models/loginmodel";
+import RolePermissionConfig, { DEFAULT_ROLE_PERMISSIONS } from "../models/rolepermissionmodel";
 
 const COOKIE_NAME = "citc_session";
 const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -12,6 +13,21 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const DUMMY_SALT = "4d1e09a00f14a7ba36b9d480b182f7c1";
 const DUMMY_HASH = Buffer.alloc(PASSWORD_BYTES);
+const ALLOWED_ROLES = ["user", "admin", "superadmin"] as const;
+const ALLOWED_STATUSES = ["active", "disabled"] as const;
+
+const getAssignableRoles = async (): Promise<string[]> => {
+  const config = await RolePermissionConfig.findOne({ key: "main" }).lean();
+  const configured = config?.permissions && typeof config.permissions === "object"
+    ? Object.keys(config.permissions as Record<string, unknown>)
+    : [];
+  return [...new Set([...ALLOWED_ROLES, ...Object.keys(DEFAULT_ROLE_PERMISSIONS), ...configured])];
+};
+
+const isValidEmail = (email: unknown): email is string =>
+  typeof email === "string" && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const isValidName = (name: unknown): name is string =>
+  typeof name === "string" && name.trim().length >= 1 && name.trim().length <= 80;
 
 const derivePasswordHash = (password: string, salt: string): Promise<Buffer> =>
   new Promise((resolve, reject) => {
@@ -55,9 +71,7 @@ const clearSessionCookie = (res: Response): void => {
 
 const validCredentials = (email: unknown, password: unknown):
   email is string =>
-  typeof email === "string" &&
-  email.length <= 254 &&
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
+  isValidEmail(email) &&
   typeof password === "string" &&
   password.length >= 8 &&
   password.length <= 128;
@@ -83,23 +97,25 @@ const createSession = async (
   setSessionCookie(res, token, remember);
 };
 
-const userResponse = (user: { _id: unknown; email: string; role?: string }) => ({
+const userResponse = (user: { _id: unknown; email: string; name?: string | null; role?: string }) => ({
   id: String(user._id),
   email: user.email,
+  name: user.name || user.email,
   role: user.role || "user",
 });
 
 export const register = async (req: Request, res: Response): Promise<void> => {
-  const { email, password, remember } = req.body as {
+  const { name, email, password, remember } = req.body as {
+    name?: unknown;
     email?: unknown;
     password?: unknown;
     remember?: unknown;
   };
 
-  if (!validCredentials(email, password)) {
+  if (!isValidName(name) || !validCredentials(email, password)) {
     res.status(400).json({
       success: false,
-      message: "Enter a valid email and a password between 8 and 128 characters.",
+      message: "Enter your name, a valid email, and a password between 8 and 128 characters.",
     });
     return;
   }
@@ -116,7 +132,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const passwordSalt = randomBytes(16).toString("hex");
     const passwordHash = (await derivePasswordHash(validPassword, passwordSalt)).toString("hex");
-    const user = await LoginModel.create({ email: normalizedEmail, passwordSalt, passwordHash });
+    const user = await LoginModel.create({ name: name.trim(), email: normalizedEmail, passwordSalt, passwordHash });
     await createSession(user._id, res, remember === true);
 
     res.status(201).json({ success: true, user: userResponse(user) });
@@ -177,6 +193,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    if (user.status === "disabled") {
+      res.status(403).json({ success: false, message: "This account is disabled. Contact an administrator." });
+      return;
+    }
+
     loginFailures.delete(clientKey);
     await createSession(user._id, res, remember === true);
     res.status(200).json({ success: true, user: userResponse(user) });
@@ -201,10 +222,15 @@ export const currentUser = async (req: Request, res: Response): Promise<void> =>
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("email role");
+    }).select("name email role status");
 
     if (!user) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
+      return;
+    }
+
+    if (user.status === "disabled") {
+      res.status(401).json({ success: false, message: "This account is disabled. Contact an administrator." });
       return;
     }
 
@@ -212,6 +238,277 @@ export const currentUser = async (req: Request, res: Response): Promise<void> =>
   } catch (error) {
     console.error("[Auth] Session lookup failed:", error);
     res.status(500).json({ success: false, message: "Could not check your session right now." });
+  }
+};
+
+export const adminUsers = async (req: Request, res: Response): Promise<void> => {
+  const token = readSessionToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: "Please sign in." });
+    return;
+  }
+
+  try {
+    const currentUser = await LoginModel.findOne({
+      sessions: {
+        $elemMatch: {
+          tokenHash: hashSessionToken(token),
+          expiresAt: { $gt: new Date() },
+        },
+      },
+    }).select("role status");
+
+    if (!currentUser) {
+      res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
+      return;
+    }
+    if (currentUser.status === "disabled") {
+      res.status(401).json({ success: false, message: "This account is disabled." });
+      return;
+    }
+
+    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+      res.status(403).json({ success: false, message: "Administrator access is required." });
+      return;
+    }
+
+    const [users, total, admins, userRoleCount, adminRoleCount, superadminRoleCount] = await Promise.all([
+      LoginModel.find({}).select("name email role status createdAt").sort({ createdAt: -1 }).lean(),
+      LoginModel.countDocuments(),
+      LoginModel.countDocuments({ role: { $in: ["admin", "superadmin"] } }),
+      LoginModel.countDocuments({ role: "user" }),
+      LoginModel.countDocuments({ role: "admin" }),
+      LoginModel.countDocuments({ role: "superadmin" }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      total,
+      admins,
+      roleCounts: { user: userRoleCount, admin: adminRoleCount, superadmin: superadminRoleCount },
+      users: users.map((user) => ({
+        id: String(user._id),
+        name: user.name || user.email,
+        email: user.email,
+        role: user.role || "user",
+        status: user.status || "active",
+        createdAt: user.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error("[Auth] Admin user list failed:", error);
+    res.status(500).json({ success: false, message: "Could not load accounts right now." });
+  }
+};
+
+export const createAdminAccount = async (req: Request, res: Response): Promise<void> => {
+  const token = readSessionToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: "Please sign in." });
+    return;
+  }
+
+  try {
+    const currentUser = await LoginModel.findOne({
+      sessions: {
+        $elemMatch: {
+          tokenHash: hashSessionToken(token),
+          expiresAt: { $gt: new Date() },
+        },
+      },
+    }).select("role status");
+
+    if (!currentUser) {
+      res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
+      return;
+    }
+    if (currentUser.status === "disabled") {
+      res.status(401).json({ success: false, message: "This account is disabled." });
+      return;
+    }
+
+    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+      res.status(403).json({ success: false, message: "Administrator access is required." });
+      return;
+    }
+
+    const { name, email, password, role, status } = req.body as {
+      name?: unknown;
+      email?: unknown;
+      password?: unknown;
+      role?: unknown;
+      status?: unknown;
+    };
+    if (!isValidEmail(email) || typeof password !== "string" || password.length < 8 || password.length > 128) {
+      res.status(400).json({ success: false, message: "Enter a valid email and a password between 8 and 128 characters." });
+      return;
+    }
+
+    const accountRole = role ?? "user";
+    const accountStatus = status ?? "active";
+    const assignableRoles = await getAssignableRoles();
+    if (typeof accountRole !== "string" || !assignableRoles.includes(accountRole)) {
+      res.status(400).json({ success: false, message: "Choose a role that exists in role settings." });
+      return;
+    }
+    if (typeof accountStatus !== "string" || !ALLOWED_STATUSES.includes(accountStatus as (typeof ALLOWED_STATUSES)[number])) {
+      res.status(400).json({ success: false, message: "Choose active or disabled status." });
+      return;
+    }
+    if (currentUser.role === "admin" && accountRole !== "user") {
+      res.status(403).json({ success: false, message: "Only a superadmin can assign administrator roles." });
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (name !== undefined && !isValidName(name)) {
+      res.status(400).json({ success: false, message: "Enter a name between 1 and 80 characters." });
+      return;
+    }
+    if (await LoginModel.exists({ email: normalizedEmail })) {
+      res.status(409).json({ success: false, message: "An account with this email already exists." });
+      return;
+    }
+
+    const passwordSalt = randomBytes(16).toString("hex");
+    const passwordHash = (await derivePasswordHash(password, passwordSalt)).toString("hex");
+    const accountName = isValidName(name) ? name.trim() : (normalizedEmail.split("@")[0] || normalizedEmail);
+    const user = await LoginModel.create({
+      email: normalizedEmail,
+      name: accountName,
+      passwordSalt,
+      passwordHash,
+      role: accountRole,
+      status: accountStatus as "active" | "disabled",
+    });
+
+    res.status(201).json({
+      success: true,
+      user: {
+        id: String(user._id),
+        name: user.name || user.email,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
+      res.status(409).json({ success: false, message: "An account with this email already exists." });
+      return;
+    }
+    console.error("[Auth] Admin account creation failed:", error);
+    res.status(500).json({ success: false, message: "Could not create the account right now." });
+  }
+};
+
+export const updateAdminAccount = async (req: Request, res: Response): Promise<void> => {
+  const token = readSessionToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: "Please sign in." });
+    return;
+  }
+
+  try {
+    const currentUser = await LoginModel.findOne({
+      sessions: {
+        $elemMatch: {
+          tokenHash: hashSessionToken(token),
+          expiresAt: { $gt: new Date() },
+        },
+      },
+    }).select("role status");
+
+    if (!currentUser) {
+      res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
+      return;
+    }
+    if (currentUser.status === "disabled") {
+      res.status(401).json({ success: false, message: "This account is disabled." });
+      return;
+    }
+
+    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+      res.status(403).json({ success: false, message: "Administrator access is required." });
+      return;
+    }
+
+    const userId = req.params.id;
+    if (typeof userId !== "string" || !Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ success: false, message: "Invalid account ID." });
+      return;
+    }
+
+    const { name, email, role, status } = req.body as { name?: unknown; email?: unknown; role?: unknown; status?: unknown };
+    if (name === undefined && email === undefined && role === undefined && status === undefined) {
+      res.status(400).json({ success: false, message: "Provide a name, email, role, or status to update." });
+      return;
+    }
+    if (name !== undefined && !isValidName(name)) {
+      res.status(400).json({ success: false, message: "Enter a name between 1 and 80 characters." });
+      return;
+    }
+    if (email !== undefined && !isValidEmail(email)) {
+      res.status(400).json({ success: false, message: "Enter a valid email address." });
+      return;
+    }
+    if (role !== undefined) {
+      const assignableRoles = await getAssignableRoles();
+      if (typeof role !== "string" || !assignableRoles.includes(role)) {
+        res.status(400).json({ success: false, message: "Choose a role that exists in role settings." });
+        return;
+      }
+    }
+    if (status !== undefined && (typeof status !== "string" || !ALLOWED_STATUSES.includes(status as (typeof ALLOWED_STATUSES)[number]))) {
+      res.status(400).json({ success: false, message: "Choose active or disabled status." });
+      return;
+    }
+
+    const account = await LoginModel.findById(userId);
+    if (!account) {
+      res.status(404).json({ success: false, message: "Account not found." });
+      return;
+    }
+
+    if (currentUser.role === "admin" && account.role !== "user") {
+      res.status(403).json({ success: false, message: "Admins can only edit standard user accounts." });
+      return;
+    }
+    if (currentUser.role === "admin" && role !== undefined && role !== account.role) {
+      res.status(403).json({ success: false, message: "Only a superadmin can change account roles." });
+      return;
+    }
+
+    if (String(account._id) === String(currentUser._id) && ((currentUser.role === "superadmin" && role !== undefined && role !== "superadmin") || (status !== undefined && status !== "active"))) {
+      res.status(400).json({ success: false, message: "You cannot remove your own superadmin access or disable your account." });
+      return;
+    }
+
+    if (name !== undefined) account.name = (name as string).trim();
+    if (email !== undefined) account.email = (email as string).trim().toLowerCase();
+    if (role !== undefined) account.role = role as string;
+    if (status !== undefined) account.status = status as "active" | "disabled";
+    await account.save();
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: String(account._id),
+        name: account.name || account.email,
+        email: account.email,
+        role: account.role || "user",
+        status: account.status || "active",
+        createdAt: account.createdAt,
+      },
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
+      res.status(409).json({ success: false, message: "An account with this email already exists." });
+      return;
+    }
+    console.error("[Auth] Admin account update failed:", error);
+    res.status(500).json({ success: false, message: "Could not update the account right now." });
   }
 };
 
