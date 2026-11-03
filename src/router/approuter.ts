@@ -1,9 +1,8 @@
 
 import express from "express";
 import multer from "multer";
-import { backgrounddownload } from "../controler/backgroundremoval";
-import { createBackgroundBlur } from "../controler/backgroundblur";
-import { adminUsers, createAdminAccount, currentUser, login, logout, register, updateAdminAccount } from "../controler/login";
+import { backgrounddownload, removeImageBackground } from "../controler/backgroundremoval";
+import { adminUsers, createAdminAccount, currentUser, deleteAdminAccount, login, logout, register, sessionStatus, updateAdminAccount } from "../controler/login";
 import {downloadCompressedImage, Imagecompressor} from '../controler/imagecompresser';
 import { downloadimage, ImageConverter } from "../controler/imageconverter";
 import { downloadBackground, saveBackground } from "../controler/backgroundchanger";
@@ -12,10 +11,17 @@ import { Bulkimage, DeleteBulkImage, DownloadAll, DownloadBulkImage, GetBulkImag
 import { AnalyzeImage,GetImageById,GetImages,UpdateImage,DeleteImage } from "../controler/imageanalyzer";
 import {createImageControl,getImageControls,getImageControlById, updateImageControl, deleteImageControl,downloadImage} from "../controler/imagequalitycontrol";
 import { DeleteDownload, DownloadZip, GetDownloadById, GetDownloadHistory, UpdateDownload } from "../controler/downloadzip";
-import { deleteAdminDownloadActivity, getAdminDownloadActivity, recordDownloadActivity } from "../controler/downloadaudit";
+import { deleteAdminDownloadActivity, getAdminDownloadActivity, getMyDownloadActivity, recordDownloadActivity } from "../controler/downloadaudit";
 import { createRole, getRolePermissions, updateRolePermission } from "../controler/rolepermissions";
 import { getImageTools,createImageTool,updateImageTool,updateImageToolStatus,deleteImageTool } from "../controler/ImageToolController";
+import { createBackgroundBlur, backgrounddownload as downloadBackgroundBlur } from "../controler/backgroundblur";
+import { consumeDeviceQuota, getDeviceQuota, releaseDeviceQuota } from "../controler/devicequota";
 const router = express.Router();
+const preventCaching: express.RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+};
+
 router.get("/", (_req, res) => {
   res.status(200).json({
     success: true,
@@ -25,12 +31,18 @@ router.get("/", (_req, res) => {
 
 router.post("/register", register);
 router.post("/login", login);
-router.get("/me", currentUser);
+router.get("/me", preventCaching, currentUser);
+router.get("/session-status", preventCaching, sessionStatus);
 router.post("/logout", logout);
 router.get("/admin/users", adminUsers);
 router.post("/admin/users", createAdminAccount);
 router.patch("/admin/users/:id", updateAdminAccount);
+router.delete("/admin/users/:id", deleteAdminAccount);
 router.post("/download-activity", recordDownloadActivity);
+router.get("/download-quota", getDeviceQuota);
+router.post("/download-quota/consume", consumeDeviceQuota);
+router.post("/download-quota/release", releaseDeviceQuota);
+router.get("/my/downloads", preventCaching, getMyDownloadActivity);
 router.get("/admin/downloads", getAdminDownloadActivity);
 router.delete("/admin/downloads/:id", deleteAdminDownloadActivity);
 router.get("/admin/permissions", getRolePermissions);
@@ -41,34 +53,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
  
 });
-
-const backgroundBlurUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024, files: 2 },
-});
-
-const uploadBackgroundBlurImages = (
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-) => {
-  backgroundBlurUpload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "subject", maxCount: 1 },
-  ])(req, res, (error: unknown) => {
-    if (error) {
-      const isTooLarge = error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE";
-      res.status(isTooLarge ? 413 : 400).json({
-        success: false,
-        message: isTooLarge
-          ? "Each uploaded image must be 20 MB or smaller."
-          : "Upload one original image and one transparent PNG subject.",
-      });
-      return;
-    }
-    next();
-  });
-};
 
 const analyzerUpload = multer({
   storage: multer.memoryStorage(),
@@ -90,9 +74,12 @@ const uploadAnalyzerImage = (req: express.Request, res: express.Response, next: 
 };
 
 router.post("/image-analyzer", uploadAnalyzerImage, AnalyzeImage);
-router.post("/background-blur", uploadBackgroundBlurImages, createBackgroundBlur);
 
-router.get('/backgrounddownload/:filename', backgrounddownload )
+router.post("/remove-background", upload.single("image"), removeImageBackground);
+router.get("/backgrounddownload/:filename", backgrounddownload);
+
+router.post("/background-blur",upload.fields([{ name: "image", maxCount: 1 },{ name: "subject", maxCount: 1 },]),createBackgroundBlur);
+router.get("/background-blur/download/:id", downloadBackgroundBlur);
 
 router.post("/image-converter",upload.single("image"),ImageConverter);
 router.get('/downloadconverter/:id', downloadimage)
@@ -130,6 +117,12 @@ router.get('/getdownload',GetDownloadHistory )
 router.get('/getdownload/:id',GetDownloadById)
 router.patch("/updatedownload/:id",UpdateDownload)
 router.delete('/deleted/:id',DeleteDownload)
+
+router.get("/imagetools", getImageTools);
+router.post("/imagetool", createImageTool);
+router.patch("/imagetool/:id", updateImageTool);
+router.patch("/imagetool/:id/status", updateImageToolStatus);
+router.delete("/imagetool/:id", deleteImageTool);
 
 router.get("/admin/imagetools", getImageTools);
 router.post("/admin/imagetools", createImageTool);

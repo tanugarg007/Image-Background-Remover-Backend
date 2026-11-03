@@ -1,6 +1,12 @@
 import { Request, Response } from "express";
+import { randomUUID } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Types } from "mongoose";
 import sharp from "sharp";
+import { BackgroundBlur } from "../models/backgroundblurmodel";
+
+const blurredImagesDir = path.resolve(process.cwd(), "uploads", "background-blur");
 
 type BackgroundBlurFiles = {
   image?: Express.Multer.File[];
@@ -11,6 +17,7 @@ export const createBackgroundBlur = async (
   req: Request,
   res: Response
 ): Promise<void> => {
+  let savedFilePath: string | undefined;
   try {
     const files = req.files as BackgroundBlurFiles | undefined;
     const originalImage = files?.image?.[0];
@@ -75,15 +82,33 @@ export const createBackgroundBlur = async (
 
     const fileBaseName = path.parse(path.basename(originalImage.originalname)).name
       .replace(/[^a-zA-Z0-9_-]/g, "-") || "image";
+    const outputFileName = `${fileBaseName}-background-blur.png`;
+    const storedFileName = `${randomUUID()}.png`;
 
-    res.status(200);
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Length", result.length);
-    res.setHeader("Content-Disposition", `attachment; filename="${fileBaseName}-background-blur.png"`);
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.send(result);
+    await mkdir(blurredImagesDir, { recursive: true });
+    savedFilePath = path.join(blurredImagesDir, storedFileName);
+    await writeFile(savedFilePath, result);
+
+    const record = await BackgroundBlur.create({
+      originalFileName: path.basename(originalImage.originalname),
+      outputFileName,
+      storedFileName,
+      blurStrength,
+      originalSize: originalImage.size,
+      outputSize: result.length,
+      width: imageMetadata.width,
+      height: imageMetadata.height,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: record.id,
+        fileName: record.outputFileName,
+      },
+    });
   } catch (error) {
+    if (savedFilePath) await unlink(savedFilePath).catch(() => undefined);
     console.error("Background blur error:", error);
     res.status(500).json({
       success: false,
@@ -91,3 +116,38 @@ export const createBackgroundBlur = async (
     });
   }
 };
+
+
+export const backgrounddownload = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    if (typeof id !== "string" || !Types.ObjectId.isValid(id)) {
+      res.status(400).json({ success: false, message: "Invalid background blur ID." });
+      return;
+    }
+
+    const record = await BackgroundBlur.findById(id);
+    if (!record) {
+      res.status(404).json({ success: false, message: "Background blur image not found." });
+      return;
+    }
+
+    const filePath = path.join(blurredImagesDir, path.basename(record.storedFileName));
+    res.setHeader("Cache-Control", "no-store");
+    res.download(filePath, path.basename(record.outputFileName), (error) => {
+      if (error && !res.headersSent) {
+        console.error("Background blur download error:", error);
+        res.status(404).json({
+          success: false,
+          message: "Background blur image file not found.",
+        });
+      }
+    });
+  } catch (error) {
+    console.error("Background download error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Could not download the blurred background image.",
+    });
+  }
+};    

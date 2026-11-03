@@ -241,6 +241,45 @@ export const currentUser = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
+// Public, non-erroring session probe for UI features that need guest/member state.
+export const sessionStatus = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const token = readSessionToken(req);
+
+  if (!token) {
+    res.status(200).json({
+      success: true,
+      authenticated: false,
+    });
+    return;
+  }
+
+  try {
+    const user = await LoginModel.findOne({
+      sessions: {
+        $elemMatch: {
+          tokenHash: hashSessionToken(token),
+          expiresAt: { $gt: new Date() },
+        },
+      },
+    }).select("status");
+
+    res.status(200).json({
+      success: true,
+      authenticated: Boolean(user && user.status !== "disabled"),
+    });
+  } catch (error) {
+    console.error("[Auth] Session status lookup failed:", error);
+
+    res.status(500).json({
+      success: false,
+      authenticated: false,
+      message: "Could not check session status.",
+    });
+  }
+};
 export const adminUsers = async (req: Request, res: Response): Promise<void> => {
   const token = readSessionToken(req);
   if (!token) {
@@ -509,6 +548,64 @@ export const updateAdminAccount = async (req: Request, res: Response): Promise<v
     }
     console.error("[Auth] Admin account update failed:", error);
     res.status(500).json({ success: false, message: "Could not update the account right now." });
+  }
+};
+
+export const deleteAdminAccount = async (req: Request, res: Response): Promise<void> => {
+  const token = readSessionToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: "Please sign in." });
+    return;
+  }
+
+  try {
+    const currentUser = await LoginModel.findOne({
+      sessions: {
+        $elemMatch: {
+          tokenHash: hashSessionToken(token),
+          expiresAt: { $gt: new Date() },
+        },
+      },
+    }).select("role status");
+
+    if (!currentUser) {
+      res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
+      return;
+    }
+    if (currentUser.status === "disabled") {
+      res.status(401).json({ success: false, message: "This account is disabled." });
+      return;
+    }
+    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+      res.status(403).json({ success: false, message: "Administrator access is required." });
+      return;
+    }
+
+    const userId = req.params.id;
+    if (typeof userId !== "string" || !Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ success: false, message: "Invalid account ID." });
+      return;
+    }
+    if (String(currentUser._id) === userId) {
+      res.status(400).json({ success: false, message: "You cannot delete your own account." });
+      return;
+    }
+
+    const account = await LoginModel.findById(userId);
+    if (!account) {
+      res.status(404).json({ success: false, message: "Account not found." });
+      return;
+    }
+    if (currentUser.role === "admin" && account.role !== "user") {
+      res.status(403).json({ success: false, message: "Admins can only delete standard user accounts." });
+      return;
+    }
+
+    await account.deleteOne();
+    res.status(200).json({ success: true, message: "Account deleted." });
+  } catch (error) {
+    console.error("[Auth] Admin account deletion failed:", error);
+    res.status(500).json({ success: false, message: "Could not delete the account right now." });
   }
 };
 
