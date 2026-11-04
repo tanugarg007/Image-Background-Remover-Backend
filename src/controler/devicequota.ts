@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import DeviceIdentity from "../models/deviceidentity";
 import DeviceQuota from "../models/devicequota";
@@ -27,39 +27,43 @@ function getOrSetDeviceId(req: Request, res: Response): string {
   return deviceId;
 }
 
-function getIpHash(req: Request): string | null {
-  let address = req.ip || req.socket.remoteAddress || "";
-  if (!address) return null;
-  if (address.startsWith("::ffff:")) address = address.slice(7);
-  const secret = process.env.GUEST_IP_HASH_SECRET || process.env.MONGO_URI;
-  if (!secret) return null;
-  return createHmac("sha256", secret).update(address).digest("hex");
-}
-
-async function getOrCreateQuota(deviceId: string, ipHash: string | null) {
+async function getOrCreateQuota(deviceId: string) {
   const identity = await DeviceIdentity.findOne({ deviceId });
   if (identity) {
     const quota = await DeviceQuota.findById(identity.quotaId);
-    if (quota) return quota;
+    if (quota) {
+      // Older deployments may have linked several browser IDs to one IP-based
+      // quota. Split shared records as each browser returns, preserving its
+      // current count and any in-flight reservations.
+      const otherDevices = await DeviceIdentity.countDocuments({
+        quotaId: quota._id,
+        deviceId: { $ne: deviceId },
+      });
+      if (otherDevices === 0) return quota;
+
+      const detachedQuota = await DeviceQuota.create({
+        downloadsUsed: quota.downloadsUsed,
+        pendingReservations: quota.pendingReservations,
+      });
+      const detached = await DeviceIdentity.updateOne(
+        { _id: identity._id, quotaId: quota._id },
+        { $set: { quotaId: detachedQuota._id } }
+      );
+      if (detached.modifiedCount === 1) return detachedQuota;
+
+      await DeviceQuota.deleteOne({ _id: detachedQuota._id });
+      const currentIdentity = await DeviceIdentity.findOne({ deviceId });
+      const currentQuota = currentIdentity
+        ? await DeviceQuota.findById(currentIdentity.quotaId)
+        : null;
+      if (currentQuota) return currentQuota;
+      throw new Error("Could not load this browser's download quota.");
+    }
     await DeviceIdentity.deleteOne({ _id: identity._id });
   }
 
-  // A browser without a known device cookie can reuse a quota seen from the same
-  // public IP. Existing browser cookies keep their quota when the network changes.
-  const matchingIpQuota = ipHash ? await DeviceQuota.findOne({ ipHash }) : null;
-  if (matchingIpQuota) {
-    try {
-      await DeviceIdentity.create({ deviceId, quotaId: matchingIpQuota._id });
-      return matchingIpQuota;
-    } catch {
-      const winner = await DeviceIdentity.findOne({ deviceId });
-      const quota = winner ? await DeviceQuota.findById(winner.quotaId) : null;
-      if (quota) return quota;
-      throw new Error("Could not initialize this browser's download quota.");
-    }
-  }
-
-  const quota = await DeviceQuota.create({ downloadsUsed: 0, ...(ipHash ? { ipHash } : {}) });
+  // Every new browser cookie gets its own quota, regardless of network/IP.
+  const quota = await DeviceQuota.create({ downloadsUsed: 0 });
   try {
     await DeviceIdentity.create({ deviceId, quotaId: quota._id });
     return quota;
@@ -74,7 +78,7 @@ async function getOrCreateQuota(deviceId: string, ipHash: string | null) {
 
 async function getGuestQuota(req: Request, res: Response) {
   const deviceId = getOrSetDeviceId(req, res);
-  return getOrCreateQuota(deviceId, getIpHash(req));
+  return getOrCreateQuota(deviceId);
 }
 
 function sendQuota(res: Response, used: number, authenticated: boolean) {

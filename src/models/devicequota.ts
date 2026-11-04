@@ -2,7 +2,6 @@ import mongoose, { Schema } from "mongoose";
 
 export interface IDeviceQuota extends mongoose.Document {
   downloadsUsed: number;
-  ipHash?: string;
   pendingReservations: Array<{
     reservationId: string;
     count: number;
@@ -15,7 +14,6 @@ export interface IDeviceQuota extends mongoose.Document {
 const schema = new Schema<IDeviceQuota>(
   {
     downloadsUsed: { type: Number, required: true, default: 0, min: 0 },
-    ipHash: { type: String, index: true, sparse: true },
     pendingReservations: {
       type: [{
         reservationId: { type: String, required: true },
