@@ -170,42 +170,84 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  try {
-    const validEmail = email as string;
-    const validPassword = password as string;
-    const normalizedEmail = validEmail.trim().toLowerCase();
-    const user = await LoginModel.findOne({ email: normalizedEmail });
-    const suppliedHash = await derivePasswordHash(
-      validPassword,
-      user?.passwordSalt || DUMMY_SALT
-    );
-    const storedHash = user ? Buffer.from(user.passwordHash, "hex") : DUMMY_HASH;
-    const passwordMatches =
-      suppliedHash.length === storedHash.length && timingSafeEqual(suppliedHash, storedHash);
-    if (!user || !passwordMatches) {
-      const current = loginFailures.get(clientKey);
-      if (!current || current.resetAt <= Date.now()) {
-        loginFailures.set(clientKey, { count: 1, resetAt: Date.now() + LOGIN_WINDOW_MS });
-      } else {
-        current.count += 1;
-      }
-      res.status(401).json({ success: false, message: "Email or password is incorrect." });
-      return;
+ 
+try {
+  const validEmail = email as string;
+  const validPassword = password as string;
+  const normalizedEmail = validEmail.trim().toLowerCase();
+
+  const user = await LoginModel.findOne({
+    email: normalizedEmail,
+  });
+
+  // TEMPORARY DEBUG LOGS
+  console.log("[LOGIN DEBUG]", {
+    emailFound: Boolean(user),
+    saltExists: Boolean(user?.passwordSalt),
+    hashExists: Boolean(user?.passwordHash),
+    hashLength: user?.passwordHash?.length,
+    role: user?.role,
+    status: user?.status,
+  });
+
+  const suppliedHash = await derivePasswordHash(
+    validPassword,
+    user?.passwordSalt || DUMMY_SALT
+  );
+
+  const storedHash = user
+    ? Buffer.from(user.passwordHash, "hex")
+    : DUMMY_HASH;
+
+  const passwordMatches =
+    suppliedHash.length === storedHash.length &&
+    timingSafeEqual(suppliedHash, storedHash);
+
+  if (!user || !passwordMatches) {
+    const current = loginFailures.get(clientKey);
+
+    if (!current || current.resetAt <= Date.now()) {
+      loginFailures.set(clientKey, {
+        count: 1,
+        resetAt: Date.now() + LOGIN_WINDOW_MS,
+      });
+    } else {
+      current.count += 1;
     }
 
-    if (user.status === "disabled") {
-      res.status(403).json({ success: false, message: "This account is disabled. Contact an administrator." });
-      return;
-    }
-
-    loginFailures.delete(clientKey);
-    await createSession(user._id, res, remember === true);
-    res.status(200).json({ success: true, user: userResponse(user) });
-  } catch (error) {
-    console.error("[Auth] Login failed:", error);
-    res.status(500).json({ success: false, message: "Could not sign in right now." });
+    res.status(401).json({
+      success: false,
+      message: "Email or password is incorrect.",
+    });
+    return;
   }
-};
+
+  if (user.status === "disabled") {
+    res.status(403).json({
+      success: false,
+      message: "This account is disabled. Contact an administrator.",
+    });
+    return;
+  }
+
+  loginFailures.delete(clientKey);
+
+  await createSession(user._id, res, remember === true);
+
+  res.status(200).json({
+    success: true,
+    user: userResponse(user),
+  });
+
+} catch (error) {
+  console.error("[Auth] Login failed:", error);
+
+  res.status(500).json({
+    success: false,
+    message: "Could not sign in right now.",
+  });
+}
+
 
 export const currentUser = async (req: Request, res: Response): Promise<void> => {
   const token = readSessionToken(req);
