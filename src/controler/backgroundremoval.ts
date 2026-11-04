@@ -30,7 +30,9 @@ export const removeImageBackground = async (req: Request, res: Response): Promis
 
     const imageBlob = new Blob([new Uint8Array(image.buffer)], { type: image.mimetype });
     const result = await removeBackground(imageBlob, {
-      model: "medium",
+      // Render's small instance has limited memory; the quantized model uses
+      // substantially less memory during inference than the medium model.
+      model: "small",
       output: { format: "image/png" },
     });
     const filename = `background-${randomUUID()}.png`;
