@@ -247,7 +247,7 @@ try {
     message: "Could not sign in right now.",
   });
 }
-
+}
 
 export const currentUser = async (req: Request, res: Response): Promise<void> => {
   const token = readSessionToken(req);
