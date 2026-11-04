@@ -14,8 +14,9 @@ const isAllowedOrigin = (origin: string): boolean => {
     return (
       (protocol === "http:" && ["localhost", "127.0.0.1"].includes(hostname)) ||
       (protocol === "https:" &&
-        hostname.startsWith("image-background-remover-frontend-") &&
-        hostname.endsWith(".vercel.app"))
+        (hostname === "image-background-remover-frontend.vercel.app" ||
+          (hostname.startsWith("image-background-remover-frontend-") &&
+            hostname.endsWith(".vercel.app"))))
     );
   } catch {
     return false;
