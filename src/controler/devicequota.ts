@@ -139,13 +139,17 @@ export async function consumeDeviceQuota(req: Request, res: Response): Promise<v
       res.status(200).json({ success: true, allowed: false, authenticated: false, remaining: Math.max(0, FREE_LIMIT - quota.downloadsUsed) });
       return;
     }
+    const reservedCount = updated.pendingReservations.reduce(
+      (total, pending) => total + pending.count,
+      0
+    );
     res.status(200).json({
       success: true,
       allowed: true,
       authenticated: false,
       reservationId,
       used: updated.downloadsUsed,
-      remaining: Math.max(0, FREE_LIMIT - updated.downloadsUsed),
+      remaining: Math.max(0, FREE_LIMIT - updated.downloadsUsed - reservedCount),
     });
   } catch (error) {
     console.error("[Device quota] Could not reserve quota:", error);
