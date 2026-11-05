@@ -35,7 +35,7 @@ const mergePermissions = (stored: unknown): RolePermissionValues => {
 
 const roleCatalog = (permissions: RolePermissionValues, storedLabels: unknown) => {
   const labels = storedLabels && typeof storedLabels === "object" ? storedLabels as Record<string, unknown> : {};
-  const knownLabels: Record<string, string> = { user: "User", admin: "Admin", superadmin: "Superadmin" };
+  const knownLabels: Record<string, string> = { user: "User", manager: "Manager", admin: "Admin", superadmin: "Superadmin" };
   return Object.keys(permissions).map((key) => ({
     key,
     label: typeof labels[key] === "string" ? labels[key] as string : knownLabels[key] || key.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "),
