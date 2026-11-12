@@ -3,6 +3,11 @@ import { Request, Response } from "express";
 import { Types } from "mongoose";
 import LoginModel from "../models/loginmodel";
 import RolePermissionConfig, { DEFAULT_ROLE_PERMISSIONS } from "../models/rolepermissionmodel";
+import {
+  isFixedSuperadminAccount,
+  isValidSuperadminIdentity,
+  SUPERADMIN_EMAIL,
+} from "../config/auth";
 
 const COOKIE_NAME = "citc_session";
 const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -13,7 +18,6 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const DUMMY_SALT = "4d1e09a00f14a7ba36b9d480b182f7c1";
 const DUMMY_HASH = Buffer.alloc(PASSWORD_BYTES);
-const ALLOWED_ROLES = ["user", "admin", "superadmin"] as const;
 const ALLOWED_STATUSES = ["active", "disabled"] as const;
 
 const getAssignableRoles = async (): Promise<string[]> => {
@@ -21,7 +25,9 @@ const getAssignableRoles = async (): Promise<string[]> => {
   const configured = config?.permissions && typeof config.permissions === "object"
     ? Object.keys(config.permissions as Record<string, unknown>)
     : [];
-  return [...new Set([...ALLOWED_ROLES, ...Object.keys(DEFAULT_ROLE_PERMISSIONS), ...configured])];
+  const deletedRoles = Array.isArray(config?.deletedRoles) ? config.deletedRoles : [];
+  return [...new Set([...Object.keys(DEFAULT_ROLE_PERMISSIONS), ...configured])]
+    .filter((role) => !deletedRoles.includes(role));
 };
 
 const isValidEmail = (email: unknown): email is string =>
@@ -124,6 +130,11 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const validEmail = email as string;
     const validPassword = password as string;
     const normalizedEmail = validEmail.trim().toLowerCase();
+    if (normalizedEmail === SUPERADMIN_EMAIL) {
+      res.status(409).json({ success: false, message: "This email is reserved for the seeded Superadmin account." });
+      return;
+    }
+
     const existingUser = await LoginModel.findOne({ email: normalizedEmail }).lean();
     if (existingUser) {
       res.status(409).json({ success: false, message: "An account with this email already exists." });
@@ -180,16 +191,6 @@ try {
     email: normalizedEmail,
   });
 
-  // TEMPORARY DEBUG LOGS
-  console.log("[LOGIN DEBUG]", {
-    emailFound: Boolean(user),
-    saltExists: Boolean(user?.passwordSalt),
-    hashExists: Boolean(user?.passwordHash),
-    hashLength: user?.passwordHash?.length,
-    role: user?.role,
-    status: user?.status,
-  });
-
   const suppliedHash = await derivePasswordHash(
     validPassword,
     user?.passwordSalt || DUMMY_SALT
@@ -222,6 +223,11 @@ try {
     return;
   }
 
+  if (!isValidSuperadminIdentity(normalizedEmail, user.role || "user")) {
+    res.status(403).json({ success: false, message: "This email and account role are not permitted for Superadmin access." });
+    return;
+  }
+
   if (user.status === "disabled") {
     res.status(403).json({
       success: false,
@@ -239,14 +245,14 @@ try {
     user: userResponse(user),
   });
 
-} catch (error) {
-  console.error("[Auth] Login failed:", error);
+}    catch (error) {
+    console.error("[Auth] Login failed:", error);
 
-  res.status(500).json({
-    success: false,
-    message: "Could not sign in right now.",
-  });
-}
+    res.status(500).json({
+      success: false,
+      message: "Could not sign in right now.",
+    });
+  }
 }
 
 export const currentUser = async (req: Request, res: Response): Promise<void> => {
@@ -273,6 +279,10 @@ export const currentUser = async (req: Request, res: Response): Promise<void> =>
 
     if (user.status === "disabled") {
       res.status(401).json({ success: false, message: "This account is disabled. Contact an administrator." });
+      return;
+    }
+    if (!isValidSuperadminIdentity(user.email, user.role || "user")) {
+      res.status(401).json({ success: false, message: "This account is not permitted to use the current session." });
       return;
     }
 
@@ -306,11 +316,15 @@ export const sessionStatus = async (
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("status");
+    }).select("email role status");
 
     res.status(200).json({
       success: true,
-      authenticated: Boolean(user && user.status !== "disabled"),
+      authenticated: Boolean(
+        user &&
+        user.status !== "disabled" &&
+        isValidSuperadminIdentity(user.email, user.role || "user")
+      ),
     });
   } catch (error) {
     console.error("[Auth] Session status lookup failed:", error);
@@ -337,7 +351,7 @@ export const adminUsers = async (req: Request, res: Response): Promise<void> => 
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("role status");
+    }).select("email role status");
 
     if (!currentUser) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
@@ -348,7 +362,7 @@ export const adminUsers = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+    if (currentUser.role !== "admin" && !isFixedSuperadminAccount(currentUser.email, currentUser.role)) {
       res.status(403).json({ success: false, message: "Administrator access is required." });
       return;
     }
@@ -397,7 +411,7 @@ export const createAdminAccount = async (req: Request, res: Response): Promise<v
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("role status");
+    }).select("email role status");
 
     if (!currentUser) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
@@ -408,7 +422,7 @@ export const createAdminAccount = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+    if (currentUser.role !== "admin" && !isFixedSuperadminAccount(currentUser.email, currentUser.role)) {
       res.status(403).json({ success: false, message: "Administrator access is required." });
       return;
     }
@@ -442,6 +456,10 @@ export const createAdminAccount = async (req: Request, res: Response): Promise<v
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail === SUPERADMIN_EMAIL || accountRole === "superadmin") {
+      res.status(400).json({ success: false, message: "The Superadmin account can only be created by the seed process." });
+      return;
+    }
     if (name !== undefined && !isValidName(name)) {
       res.status(400).json({ success: false, message: "Enter a name between 1 and 80 characters." });
       return;
@@ -499,7 +517,7 @@ export const updateAdminAccount = async (req: Request, res: Response): Promise<v
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("role status");
+    }).select("email role status");
 
     if (!currentUser) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
@@ -510,7 +528,7 @@ export const updateAdminAccount = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+    if (currentUser.role !== "admin" && !isFixedSuperadminAccount(currentUser.email, currentUser.role)) {
       res.status(403).json({ success: false, message: "Administrator access is required." });
       return;
     }
@@ -549,6 +567,15 @@ export const updateAdminAccount = async (req: Request, res: Response): Promise<v
     const account = await LoginModel.findById(userId);
     if (!account) {
       res.status(404).json({ success: false, message: "Account not found." });
+      return;
+    }
+
+    const updatedEmail = email === undefined
+      ? account.email.trim().toLowerCase()
+      : (email as string).trim().toLowerCase();
+    const updatedRole = role === undefined ? account.role : role as string;
+    if (!isValidSuperadminIdentity(updatedEmail, updatedRole)) {
+      res.status(400).json({ success: false, message: "Only the seeded Superadmin email can have the Superadmin role." });
       return;
     }
 
@@ -608,7 +635,7 @@ export const deleteAdminAccount = async (req: Request, res: Response): Promise<v
           expiresAt: { $gt: new Date() },
         },
       },
-    }).select("role status");
+    }).select("email role status");
 
     if (!currentUser) {
       res.status(401).json({ success: false, message: "Your session has expired. Please sign in again." });
@@ -618,7 +645,8 @@ export const deleteAdminAccount = async (req: Request, res: Response): Promise<v
       res.status(401).json({ success: false, message: "This account is disabled." });
       return;
     }
-    if (currentUser.role !== "admin" && currentUser.role !== "superadmin") {
+    if (currentUser.role !== "admin" && !isFixedSuperadminAccount(currentUser.email, currentUser.role)) {
+
       res.status(403).json({ success: false, message: "Administrator access is required." });
       return;
     }

@@ -58,6 +58,7 @@ import {
 // Controllers - Image Analyzer
 import {
   AnalyzeImage,
+  DownloadAnalyzedImage,
   GetImageById,
   GetImages,
   UpdateImage,
@@ -94,6 +95,7 @@ import {
 // Controllers - RBAC
 import {
   createRole,
+  deleteRole,
   getRolePermissions,
   updateRolePermission,
 } from "../controler/rolepermissions";
@@ -217,6 +219,7 @@ router.patch("/admin/permissions", updateRolePermission);
 
 // Create new role
 router.post("/admin/roles", createRole);
+router.delete("/admin/roles/:role", deleteRole);
 
 
 // ==========================================
@@ -351,6 +354,7 @@ router.post(
   uploadAnalyzerImage,
   AnalyzeImage
 );
+router.get("/image-analyzer/:id/download", DownloadAnalyzedImage);
 
 router.post(
   "/analyze-image",

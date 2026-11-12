@@ -123,6 +123,7 @@ interface IRolePermissionConfig extends mongoose.Document {
   key: string;
   permissions: RolePermissionValues;
   roleLabels?: Record<string, string>;
+  deletedRoles?: string[];
 }
 
 const rolePermissionSchema = new Schema<IRolePermissionConfig>(
@@ -130,6 +131,7 @@ const rolePermissionSchema = new Schema<IRolePermissionConfig>(
     key: { type: String, required: true, unique: true },
     permissions: { type: Schema.Types.Mixed, required: true },
     roleLabels: { type: Schema.Types.Mixed, default: {} },
+    deletedRoles: { type: [String], default: [] },
   },
   { timestamps: true }
 );

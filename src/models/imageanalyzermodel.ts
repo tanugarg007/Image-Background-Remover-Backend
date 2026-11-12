@@ -4,6 +4,7 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface IImageAnalyzer extends Document {
   fileName: string;
   url: string;
+  storedFileName?: string;
   contentHash: string;
   fileSize: number;
   format: string;
@@ -26,6 +27,11 @@ const ImageAnalyzerSchema = new Schema<IImageAnalyzer>(
     },
 
     url: {
+      type: String,
+      default: "",
+    },
+
+    storedFileName: {
       type: String,
       default: "",
     },

@@ -6,19 +6,23 @@ import RolePermissionConfig, {
   RolePermissionKey,
   RolePermissionValues,
 } from "../models/rolepermissionmodel";
+import LoginModel from "../models/loginmodel";
 import { getSessionUser } from "../midleware/sessionuser";
 
 const CONFIG_KEY = "main";
 const BUILT_IN_ROLES = Object.keys(DEFAULT_ROLE_PERMISSIONS);
 const isRoleKey = (value: string): boolean => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 40;
 
-const mergePermissions = (stored: unknown): RolePermissionValues => {
+const mergePermissions = (stored: unknown, deletedRoles: unknown = []): RolePermissionValues => {
   const source = stored && typeof stored === "object" ? stored as Record<string, Record<string, unknown>> : {};
+  const deleted = new Set(Array.isArray(deletedRoles) ? deletedRoles.filter((role): role is string => typeof role === "string") : []);
   const merged: RolePermissionValues = Object.fromEntries(
-    Object.entries(DEFAULT_ROLE_PERMISSIONS).map(([role, values]) => [role, { ...values }])
+    Object.entries(DEFAULT_ROLE_PERMISSIONS)
+      .filter(([role]) => !deleted.has(role))
+      .map(([role, values]) => [role, { ...values }])
   );
   for (const role of Object.keys(source)) {
-    if (!isRoleKey(role)) continue;
+    if (!isRoleKey(role) || deleted.has(role)) continue;
     if (!merged[role]) merged[role] = Object.fromEntries(ROLE_PERMISSION_KEYS.map((permission) => [permission, false])) as RolePermissionValues[string];
     const legacyManageUsers = source[role]?.["manageUsers" as RolePermissionKey];
     if (typeof legacyManageUsers === "boolean") {
@@ -56,7 +60,7 @@ export const getRolePermissions = async (req: Request, res: Response): Promise<v
     }
 
     const config = await RolePermissionConfig.findOne({ key: CONFIG_KEY }).lean();
-    const permissions = mergePermissions(config?.permissions);
+    const permissions = mergePermissions(config?.permissions, config?.deletedRoles);
     res.status(200).json({ success: true, permissions, roles: roleCatalog(permissions, config?.roleLabels) });
   } catch (error) {
     console.error("[Role permissions] Could not load configuration:", error);
@@ -98,7 +102,7 @@ export const updateRolePermission = async (req: Request, res: Response): Promise
     if (!config) {
       config = new RolePermissionConfig({ key: CONFIG_KEY, permissions: DEFAULT_ROLE_PERMISSIONS });
     }
-    const permissions = mergePermissions(config.permissions);
+    const permissions = mergePermissions(config.permissions, config.deletedRoles);
     if (!permissions[role]) {
       res.status(404).json({ success: false, message: "Role not found. Create it before changing permissions." });
       return;
@@ -134,29 +138,93 @@ export const createRole = async (req: Request, res: Response): Promise<void> => 
     }
     const label = name.trim().replace(/\s+/g, " ");
     const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    if (!isRoleKey(key) || BUILT_IN_ROLES.includes(key)) {
+    if (!isRoleKey(key) || key === "user" || key === "superadmin") {
       res.status(400).json({ success: false, message: "Choose a role name using letters or numbers that is not already reserved." });
       return;
     }
 
     let config = await RolePermissionConfig.findOne({ key: CONFIG_KEY });
-    if (!config) config = new RolePermissionConfig({ key: CONFIG_KEY, permissions: DEFAULT_ROLE_PERMISSIONS, roleLabels: {} });
-    const permissions = mergePermissions(config.permissions);
+    if (!config) config = new RolePermissionConfig({ key: CONFIG_KEY, permissions: DEFAULT_ROLE_PERMISSIONS, roleLabels: {}, deletedRoles: [] });
+    const deletedRoles = Array.isArray(config.deletedRoles) ? [...config.deletedRoles] : [];
+    const permissions = mergePermissions(config.permissions, deletedRoles);
     if (permissions[key]) {
       res.status(409).json({ success: false, message: "A role with this name already exists." });
       return;
     }
+    if (BUILT_IN_ROLES.includes(key) && !deletedRoles.includes(key)) {
+      res.status(400).json({ success: false, message: "That role name is reserved." });
+      return;
+    }
     permissions[key] = Object.fromEntries(ROLE_PERMISSION_KEYS.map((permission) => [permission, false])) as RolePermissionValues[string];
+    config.deletedRoles = deletedRoles.filter((role) => role !== key);
     const labels = config.roleLabels && typeof config.roleLabels === "object" ? { ...config.roleLabels } : {};
     labels[key] = label;
     config.permissions = permissions;
     config.roleLabels = labels;
     config.markModified("permissions");
     config.markModified("roleLabels");
+    config.markModified("deletedRoles");
     await config.save();
     res.status(201).json({ success: true, permissions, roles: roleCatalog(permissions, labels), role: { key, label, description: "Custom role" } });
   } catch (error) {
     console.error("[Role permissions] Could not create role:", error);
     res.status(500).json({ success: false, message: "Could not create role." });
+  }
+};
+
+export const deleteRole = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = await getSessionUser(req);
+    if (!user) {
+      res.status(401).json({ success: false, message: "Please sign in." });
+      return;
+    }
+    if (user.role !== "superadmin") {
+      res.status(403).json({ success: false, message: "Superadmin access is required." });
+      return;
+    }
+
+    const role = req.params.role;
+    if (typeof role !== "string" || !isRoleKey(role) || role === "user" || role === "superadmin") {
+      res.status(400).json({ success: false, message: "This role cannot be deleted." });
+      return;
+    }
+
+    let config = await RolePermissionConfig.findOne({ key: CONFIG_KEY });
+    if (!config) {
+      config = new RolePermissionConfig({ key: CONFIG_KEY, permissions: DEFAULT_ROLE_PERMISSIONS, roleLabels: {}, deletedRoles: [] });
+    }
+    const deletedRoles = Array.isArray(config.deletedRoles) ? [...config.deletedRoles] : [];
+    const permissions = mergePermissions(config.permissions, deletedRoles);
+    if (!permissions[role]) {
+      res.status(404).json({ success: false, message: "Role not found." });
+      return;
+    }
+
+    const assignedCount = await LoginModel.countDocuments({ role });
+    if (assignedCount > 0) {
+      res.status(409).json({
+        success: false,
+        message: `This role is assigned to ${assignedCount} account${assignedCount === 1 ? "" : "s"}. Reassign them before deleting the role.`,
+      });
+      return;
+    }
+
+    delete permissions[role];
+    const labels = config.roleLabels && typeof config.roleLabels === "object" ? { ...config.roleLabels } : {};
+    delete labels[role];
+    config.permissions = permissions;
+    config.roleLabels = labels;
+    if (BUILT_IN_ROLES.includes(role)) deletedRoles.push(role);
+    config.deletedRoles = [...new Set(deletedRoles)];
+    config.markModified("permissions");
+    config.markModified("roleLabels");
+    config.markModified("deletedRoles");
+    await config.save();
+
+    res.status(200).json({ success: true, permissions, roles: roleCatalog(permissions, labels) });
+  } catch (error) {
+    console.error("[Role permissions] Could not delete role:", error);
+    res.status(500).json({ success: false, message: "Could not delete role." });
   }
 };

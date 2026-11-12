@@ -25,12 +25,16 @@ export const recordDownloadActivity = async (req: Request, res: Response): Promi
 
   try {
     const user = await getSessionUser(req);
-    if (!user && typeof reservationId !== "string") {
-      res.status(400).json({ success: false, message: "A successful guest download reservation is required." });
-      return;
+    let quotaResult;
+    if (typeof reservationId !== "string") {
+      if (!user) {
+        res.status(400).json({ success: false, message: "A successful download reservation is required." });
+        return;
+      }
+    } else {
+      quotaResult = await commitDeviceQuota(req, res);
+      if (!quotaResult) return;
     }
-    const quotaResult = user ? null : await commitDeviceQuota(req, res);
-    if (!user && !quotaResult) return;
     try {
       await DownloadAudit.create({
         ...(user ? { userId: new Types.ObjectId(user.id) } : {}),

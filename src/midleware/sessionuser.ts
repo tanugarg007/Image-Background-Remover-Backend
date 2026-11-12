@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Request } from "express";
 import LoginModel from "../models/loginmodel";
+import { isValidSuperadminIdentity } from "../config/auth";
 
 export interface SessionUser {
   id: string;
@@ -34,6 +35,10 @@ export const getSessionUser = async (req: Request): Promise<SessionUser | null> 
     },
   }).select("email name role status");
 
-  if (!user || user.status === "disabled") return null;
+  if (
+    !user ||
+    user.status === "disabled" ||
+    !isValidSuperadminIdentity(user.email, user.role || "user")
+  ) return null;
   return { id: String(user._id), email: user.email, name: user.name || user.email, role: user.role || "user" };
 };

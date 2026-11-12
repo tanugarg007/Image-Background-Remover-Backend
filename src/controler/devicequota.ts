@@ -5,7 +5,7 @@ import DeviceQuota from "../models/devicequota";
 import { getSessionUser } from "../midleware/sessionuser";
 
 const FREE_LIMIT = 3;
-const DEVICE_COOKIE = "citc_guest_device";
+const DEVICE_COOKIE = "citc_guest_device_v2";
 const DEVICE_ID_PATTERN = /^[0-9a-f-]{36}$/i;
 const RESERVATION_TTL_MS = 15 * 60 * 1000;
 
@@ -21,7 +21,10 @@ function readCookie(req: Request, name: string): string | null {
 function getOrSetDeviceId(req: Request, res: Response): string {
   const existing = readCookie(req, DEVICE_COOKIE);
   if (existing && DEVICE_ID_PATTERN.test(existing)) return existing.toLowerCase();
-  const deviceId = randomUUID();
+  const headerDeviceId = req.get("X-Guest-Device");
+  const deviceId = headerDeviceId && DEVICE_ID_PATTERN.test(headerDeviceId)
+    ? headerDeviceId.toLowerCase()
+    : randomUUID();
   const secure = req.secure ? "; Secure" : "";
   res.append("Set-Cookie", `${DEVICE_COOKIE}=${encodeURIComponent(deviceId)}; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax${secure}`);
   return deviceId;
@@ -32,19 +35,17 @@ async function getOrCreateQuota(deviceId: string) {
   if (identity) {
     const quota = await DeviceQuota.findById(identity.quotaId);
     if (quota) {
-      // Older deployments may have linked several browser IDs to one IP-based
-      // quota. Split shared records as each browser returns, preserving its
-      // current count and any in-flight reservations.
+      // Older deployments may have linked several browser IDs to one quota.
+      // Keep it shared until active reservations finish, then split it.
       const otherDevices = await DeviceIdentity.countDocuments({
         quotaId: quota._id,
         deviceId: { $ne: deviceId },
       });
       if (otherDevices === 0) return quota;
+      if (quota.pendingReservations.length > 0) return quota;
 
-      const detachedQuota = await DeviceQuota.create({
-        downloadsUsed: quota.downloadsUsed,
-        pendingReservations: quota.pendingReservations,
-      });
+      // Usage from a shared legacy quota cannot be attributed to one browser.
+      const detachedQuota = await DeviceQuota.create({ downloadsUsed: 0 });
       const detached = await DeviceIdentity.updateOne(
         { _id: identity._id, quotaId: quota._id },
         { $set: { quotaId: detachedQuota._id } }
@@ -78,28 +79,50 @@ async function getOrCreateQuota(deviceId: string) {
 
 async function getGuestQuota(req: Request, res: Response) {
   const deviceId = getOrSetDeviceId(req, res);
-  return getOrCreateQuota(deviceId);
+  let quota = await getOrCreateQuota(deviceId);
+  if (typeof quota.remainingDownloads !== "number") {
+    const reserved = (quota.pendingReservations || [])
+      .reduce((total, reservation) => total + (Number(reservation.count) || 0), 0);
+    await DeviceQuota.updateOne(
+      { _id: quota._id, remainingDownloads: { $exists: false } },
+      { $set: { remainingDownloads: Math.max(0, FREE_LIMIT - quota.downloadsUsed - reserved) } }
+    );
+  }
+
+  const now = new Date();
+  const expired = (quota.pendingReservations || []).filter((reservation) => reservation.expiresAt <= now);
+  for (const reservation of expired) {
+    await DeviceQuota.updateOne(
+      {
+        _id: quota._id,
+        pendingReservations: { $elemMatch: { reservationId: reservation.reservationId, expiresAt: { $lte: now } } },
+      },
+      {
+        $pull: { pendingReservations: { reservationId: reservation.reservationId } },
+        $inc: { remainingDownloads: reservation.count },
+      }
+    );
+  }
+
+  quota = (await DeviceQuota.findById(quota._id)) || quota;
+  return quota;
 }
 
-function sendQuota(res: Response, used: number, authenticated: boolean) {
+function sendQuota(res: Response, used: number, authenticated: boolean, remaining: number) {
   res.status(200).json({
     success: true,
     authenticated,
     limit: FREE_LIMIT,
     used,
-    remaining: authenticated ? null : Math.max(0, FREE_LIMIT - used),
+    remaining: Math.max(0, remaining),
   });
 }
 
 export async function getDeviceQuota(req: Request, res: Response): Promise<void> {
   try {
-    const user = await getSessionUser(req);
-    if (user) {
-      sendQuota(res, 0, true);
-      return;
-    }
+    const authenticated = Boolean(await getSessionUser(req));
     const quota = await getGuestQuota(req, res);
-    sendQuota(res, quota.downloadsUsed, false);
+    sendQuota(res, quota.downloadsUsed, authenticated, quota.remainingDownloads ?? Math.max(0, FREE_LIMIT - quota.downloadsUsed));
   } catch (error) {
     console.error("[Device quota] Could not load quota:", error);
     res.status(500).json({ success: false, message: "Could not load the download limit." });
@@ -113,43 +136,61 @@ export async function consumeDeviceQuota(req: Request, res: Response): Promise<v
     return;
   }
   try {
-    if (await getSessionUser(req)) {
-      res.status(200).json({ success: true, allowed: true, authenticated: true, remaining: null });
-      return;
-    }
+    const authenticated = Boolean(await getSessionUser(req));
     const quota = await getGuestQuota(req, res);
     const now = new Date();
-    await DeviceQuota.updateOne(
-      { _id: quota._id },
-      { $pull: { pendingReservations: { expiresAt: { $lte: now } } } }
-    );
+    if (authenticated) {
+      const reservationId = randomUUID();
+      const reservation = { reservationId, count, expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS) };
+      const updated = await DeviceQuota.findOneAndUpdate(
+        { _id: quota._id },
+        { $push: { pendingReservations: reservation } },
+        { new: true }
+      );
+      if (!updated) throw new Error("Could not reserve the signed-in download.");
+      res.status(200).json({
+        success: true,
+        allowed: true,
+        authenticated: true,
+        reservationId,
+        used: updated.downloadsUsed,
+        remaining: updated.remainingDownloads ?? 0,
+      });
+      return;
+    }
     if (count > FREE_LIMIT) {
-      res.status(200).json({ success: true, allowed: false, authenticated: false, remaining: 0 });
+      res.status(200).json({
+        success: true,
+        allowed: false,
+        authenticated,
+        remaining: quota.remainingDownloads ?? 0,
+      });
       return;
     }
     const reservationId = randomUUID();
     const reservation = { reservationId, count, expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS) };
-    const pendingCount = { $sum: { $map: { input: "$pendingReservations", as: "reservation", in: "$$reservation.count" } } };
     const updated = await DeviceQuota.findOneAndUpdate(
-      { _id: quota._id, $expr: { $lte: [{ $add: ["$downloadsUsed", pendingCount] }, FREE_LIMIT - count] } },
-      { $push: { pendingReservations: reservation } },
+      { _id: quota._id, remainingDownloads: { $gte: count } },
+      { $inc: { remainingDownloads: -count }, $push: { pendingReservations: reservation } },
       { new: true }
     );
     if (!updated) {
-      res.status(200).json({ success: true, allowed: false, authenticated: false, remaining: Math.max(0, FREE_LIMIT - quota.downloadsUsed) });
+      const latestQuota = await DeviceQuota.findById(quota._id);
+      res.status(200).json({
+        success: true,
+        allowed: false,
+        authenticated,
+        remaining: latestQuota?.remainingDownloads ?? quota.remainingDownloads ?? 0,
+      });
       return;
     }
-    const reservedCount = updated.pendingReservations.reduce(
-      (total, pending) => total + pending.count,
-      0
-    );
     res.status(200).json({
       success: true,
       allowed: true,
-      authenticated: false,
+      authenticated,
       reservationId,
       used: updated.downloadsUsed,
-      remaining: Math.max(0, FREE_LIMIT - updated.downloadsUsed - reservedCount),
+      remaining: updated.remainingDownloads ?? 0,
     });
   } catch (error) {
     console.error("[Device quota] Could not reserve quota:", error);
@@ -164,12 +205,17 @@ export async function releaseDeviceQuota(req: Request, res: Response): Promise<v
     return;
   }
   try {
-    if (await getSessionUser(req)) {
-      res.status(200).json({ success: true });
-      return;
-    }
     const quota = await getGuestQuota(req, res);
-    await DeviceQuota.updateOne({ _id: quota._id }, { $pull: { pendingReservations: { reservationId } } });
+    const reservation = quota.pendingReservations.find((entry) => entry.reservationId === reservationId);
+    if (reservation) {
+      await DeviceQuota.updateOne(
+        { _id: quota._id, pendingReservations: { $elemMatch: { reservationId } } },
+        {
+          $pull: { pendingReservations: { reservationId } },
+          $inc: { remainingDownloads: reservation.count },
+        }
+      );
+    }
     res.status(200).json({ success: true });
   } catch (error) {
     console.error("[Device quota] Could not release reservation:", error);
@@ -195,5 +241,5 @@ export async function commitDeviceQuota(req: Request, res: Response): Promise<{ 
     res.status(409).json({ success: false, message: "Download reservation expired. Please try again." });
     return null;
   }
-  return { used: updated.downloadsUsed, remaining: Math.max(0, FREE_LIMIT - updated.downloadsUsed) };
+  return { used: updated.downloadsUsed, remaining: updated.remainingDownloads ?? 0 };
 }

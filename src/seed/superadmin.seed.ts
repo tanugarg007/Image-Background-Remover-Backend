@@ -1,10 +1,9 @@
 ﻿import { randomBytes, scrypt } from "node:crypto";
 import LoginModel from "../models/loginmodel";
-
 import Role from "../models/Role";
+import { SUPERADMIN_EMAIL } from "../config/auth";
 
 const SUPERADMIN_NAME = "Super Admin";
-const SUPERADMIN_EMAIL = "admin@example.com";
 const SUPERADMIN_PASSWORD = "Admin@123456";
 
 const PASSWORD_BYTES = 64;
@@ -26,6 +25,9 @@ export const seedSuperAdmin = async () => {
   });
 
   if (existingUser) {
+    if (existingUser.role !== "superadmin") {
+      throw new Error("The configured superadmin email is already assigned to a non-superadmin account.");
+    }
     console.log("Superadmin already exists.");
     return;
   }
@@ -46,11 +48,6 @@ export const seedSuperAdmin = async () => {
     await derivePasswordHash(SUPERADMIN_PASSWORD, passwordSalt)
   ).toString("hex");
       
-  console.log("Password Salt:", passwordSalt);
-console.log("Password Hash:", passwordHash);
-console.log("Password Hash Type:", typeof passwordHash);
-console.log("Password Hash Length:", passwordHash?.length);
-
   // Create superadmin account
   await LoginModel.create({
     name: SUPERADMIN_NAME,

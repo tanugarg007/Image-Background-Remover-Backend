@@ -1,9 +1,17 @@
 
 import { Request, Response } from "express";
 import { createHash } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
+import mongoose from "mongoose";
 import sharp from "sharp";
 import { ImageAnalyzer } from "../models/imageanalyzermodel";
 const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
+const analyzedImagesDirectory = path.resolve(
+  process.cwd(),
+  "uploads",
+  "analyzed-images"
+);
 
 const getAspectRatio = (width: number, height: number): string => {
   const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
@@ -60,6 +68,15 @@ export const AnalyzeImage = async (
       float: "32-bit floating point",
     };
     const contentHash = createHash("sha256").update(file.buffer).digest("hex");
+    const extension =
+      info.format.toLowerCase().replace(/[^a-z0-9]/g, "") || "image";
+    const storedFileName = `${contentHash}.${extension}`;
+    await mkdir(analyzedImagesDirectory, { recursive: true });
+    await writeFile(
+      path.join(analyzedImagesDirectory, storedFileName),
+      file.buffer
+    );
+
     const megapixels = Number(((info.width * info.height) / 1_000_000).toFixed(2));
     const colorDepth = depthLabels[info.depth || ""] || info.depth || "Unknown";
     const colorSpace = info.space || "Unknown";
@@ -67,6 +84,7 @@ export const AnalyzeImage = async (
     const imageDetails = {
       fileName: file.originalname,
       url: "",
+      storedFileName,
       contentHash,
       format: info.format.toUpperCase(),
       mimeType: file.mimetype,
@@ -111,6 +129,69 @@ export const AnalyzeImage = async (
       success: false,
       message: "Unable to analyze image.",
       error: error instanceof Error ? error.message : "Unexpected error.",
+    });
+  }
+};
+
+// GET: Download the original analyzed image
+export const DownloadAnalyzedImage = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid image ID.",
+    });
+    return;
+  }
+
+  try {
+    const image = await ImageAnalyzer.findById(req.params.id);
+
+    if (!image) {
+      res.status(404).json({
+        success: false,
+        message: "Image not found.",
+      });
+      return;
+    }
+
+    if (!image.storedFileName) {
+      res.status(404).json({
+        success: false,
+        message: "The original image is not available for this record.",
+      });
+      return;
+    }
+
+    const storedFileName = path.basename(
+      image.storedFileName.replace(/\\/g, "/")
+    );
+    const filePath = path.join(analyzedImagesDirectory, storedFileName);
+    const downloadName = path.basename(image.fileName.replace(/\\/g, "/"));
+
+    res.setHeader("Cache-Control", "no-store");
+    res.download(filePath, downloadName, (error) => {
+      if (!error) return;
+
+      console.error("Image analyzer download failed:", error);
+      if (res.headersSent) return;
+
+      const missingFile =
+        "code" in error && error.code === "ENOENT";
+      res.status(missingFile ? 404 : 500).json({
+        success: false,
+        message: missingFile
+          ? "The original image file is unavailable."
+          : "Image download failed.",
+      });
+    });
+  } catch (error) {
+    console.error("Image analyzer download failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Image download failed.",
     });
   }
 };
@@ -169,33 +250,22 @@ export const UpdateImage = async (
   res: Response
 ): Promise<void> => {
   try {
-    const allowedFields = [
-      "name",
-      "format",
-      "size",
-      "width",
-      "height",
-      "megapixels",
-      "colorSpace",
-      "channels",
-      "colorDepth",
-      "orientation",
-      "exifOrientation",
-      "hasAlpha",
-      "lastModified",
-    ];
+    const fileName =
+      typeof req.body.fileName === "string"
+        ? req.body.fileName.replace(/\\/g, "/").split("/").pop()?.trim()
+        : "";
 
-    const updates: Record<string, unknown> = {};
-
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
-      }
+    if (!fileName) {
+      res.status(400).json({
+        success: false,
+        message: "Please provide a valid image name.",
+      });
+      return;
     }
 
     const image = await ImageAnalyzer.findByIdAndUpdate(
       req.params.id,
-      updates,
+      { fileName },
       { new: true, runValidators: true }
     );
 
@@ -212,8 +282,9 @@ export const UpdateImage = async (
       message: "Image updated successfully.",
       data: image,
     });
-  } catch {
-    res.status(400).json({
+  } catch (error) {
+    console.error("Failed to update analyzed image:", error);
+    res.status(500).json({
       success: false,
       message: "Unable to update image.",
     });
@@ -225,10 +296,16 @@ export const DeleteImage = async (
   req: Request,
   res: Response
 ): Promise<void> => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid image ID.",
+    });
+    return;
+  }
+
   try {
-    const image = await ImageAnalyzer.findByIdAndDelete(
-      req.params.id
-    );
+    const image = await ImageAnalyzer.findById(req.params.id);
 
     if (!image) {
       res.status(404).json({
@@ -238,14 +315,28 @@ export const DeleteImage = async (
       return;
     }
 
+    if (image.storedFileName) {
+      const storedFileName = path.basename(
+        image.storedFileName.replace(/\\/g, "/")
+      );
+      await unlink(path.join(analyzedImagesDirectory, storedFileName)).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        }
+      );
+    }
+
+    await image.deleteOne();
+
     res.status(200).json({
       success: true,
       message: "Image record deleted successfully.",
     });
-  } catch {
-    res.status(400).json({
+  } catch (error) {
+    console.error("Failed to delete analyzed image:", error);
+    res.status(500).json({
       success: false,
-      message: "Invalid image ID.",
+      message: "Unable to delete image.",
     });
   }
 };
