@@ -12,10 +12,14 @@ import { getSessionUser } from "../midleware/sessionuser";
 const CONFIG_KEY = "main";
 const BUILT_IN_ROLES = Object.keys(DEFAULT_ROLE_PERMISSIONS);
 const isRoleKey = (value: string): boolean => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 40;
+const ALL_PERMISSIONS: RolePermissionValues[string] = Object.fromEntries(
+  ROLE_PERMISSION_KEYS.map((permission) => [permission, true])
+) as RolePermissionValues[string];
 
 const mergePermissions = (stored: unknown, deletedRoles: unknown = []): RolePermissionValues => {
   const source = stored && typeof stored === "object" ? stored as Record<string, Record<string, unknown>> : {};
   const deleted = new Set(Array.isArray(deletedRoles) ? deletedRoles.filter((role): role is string => typeof role === "string") : []);
+  deleted.delete("superadmin");
   const merged: RolePermissionValues = Object.fromEntries(
     Object.entries(DEFAULT_ROLE_PERMISSIONS)
       .filter(([role]) => !deleted.has(role))
@@ -34,6 +38,7 @@ const mergePermissions = (stored: unknown, deletedRoles: unknown = []): RolePerm
       if (typeof value === "boolean") merged[role][permission] = value;
     }
   }
+  merged.superadmin = { ...ALL_PERMISSIONS };
   return merged;
 };
 
@@ -89,6 +94,10 @@ export const updateRolePermission = async (req: Request, res: Response): Promise
       !rolePermissions || typeof rolePermissions !== "object" || Array.isArray(rolePermissions)
     ) {
       res.status(400).json({ success: false, message: "Provide a valid role and permissions." });
+      return;
+    }
+    if (role === "superadmin") {
+      res.status(400).json({ success: false, message: "Superadmin permissions are protected and always enabled." });
       return;
     }
     const submitted = rolePermissions as Record<string, unknown>;
