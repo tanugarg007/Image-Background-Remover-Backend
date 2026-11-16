@@ -13,6 +13,19 @@ function isFeedbackCategory(value: unknown): value is FeedbackCategory {
   return typeof value === "string" && feedbackCategories.includes(value);
 }
 
+async function requireSuperadmin(req: Request, res: Response) {
+  const user = await getSessionUser(req);
+  if (!user) {
+    res.status(401).json({ success: false, message: "Please sign in." });
+    return null;
+  }
+  if (user.role !== "superadmin") {
+    res.status(403).json({ success: false, message: "Superadmin access is required." });
+    return null;
+  }
+  return user;
+}
+
 export const submitFeedback = async (
   req: Request,
   res: Response
@@ -64,15 +77,7 @@ export const getAdminFeedback = async (
   res: Response
 ): Promise<void> => {
   try {
-    const user = await getSessionUser(req);
-    if (!user) {
-      res.status(401).json({ success: false, message: "Please sign in." });
-      return;
-    }
-    if (user.role !== "superadmin") {
-      res.status(403).json({ success: false, message: "Superadmin access is required." });
-      return;
-    }
+    if (!(await requireSuperadmin(req, res))) return;
 
     const feedback = await Feedback.find()
       .sort({ createdAt: -1 })
@@ -82,5 +87,72 @@ export const getAdminFeedback = async (
   } catch (error) {
     console.error("[Feedback] Could not load feedback:", error);
     res.status(500).json({ success: false, message: "Could not load feedback." });
+  }
+};
+
+export const replyToFeedback = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const user = await requireSuperadmin(req, res);
+    if (!user) return;
+
+    const reply = typeof req.body?.reply === "string" ? req.body.reply.trim() : "";
+    if (!reply || reply.length > 3000) {
+      res.status(400).json({ success: false, message: "Reply must be between 1 and 3000 characters." });
+      return;
+    }
+    const feedbackId = req.params.id;
+    if (typeof feedbackId !== "string" || !Types.ObjectId.isValid(feedbackId)) {
+      res.status(400).json({ success: false, message: "Invalid feedback ID." });
+      return;
+    }
+
+    const feedback = await Feedback.findByIdAndUpdate(
+      feedbackId,
+      {
+        $set: {
+          adminReply: reply,
+          repliedAt: new Date(),
+          repliedBy: new Types.ObjectId(user.id),
+        },
+      },
+      { new: true, runValidators: true }
+    ).lean();
+    if (!feedback) {
+      res.status(404).json({ success: false, message: "Feedback was not found." });
+      return;
+    }
+
+    res.status(200).json({ success: true, data: feedback });
+  } catch (error) {
+    console.error("[Feedback] Could not save reply:", error);
+    res.status(500).json({ success: false, message: "Could not save the reply." });
+  }
+};
+
+export const deleteFeedback = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!(await requireSuperadmin(req, res))) return;
+    const feedbackId = req.params.id;
+    if (typeof feedbackId !== "string" || !Types.ObjectId.isValid(feedbackId)) {
+      res.status(400).json({ success: false, message: "Invalid feedback ID." });
+      return;
+    }
+
+    const feedback = await Feedback.findByIdAndDelete(feedbackId);
+    if (!feedback) {
+      res.status(404).json({ success: false, message: "Feedback was not found." });
+      return;
+    }
+
+    res.status(200).json({ success: true, message: "Feedback deleted." });
+  } catch (error) {
+    console.error("[Feedback] Could not delete feedback:", error);
+    res.status(500).json({ success: false, message: "Could not delete feedback." });
   }
 };

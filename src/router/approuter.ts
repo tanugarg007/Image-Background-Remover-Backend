@@ -121,7 +121,12 @@ import {
   getDeviceQuota,
   releaseDeviceQuota,
 } from "../controler/devicequota";
-import { getAdminFeedback, submitFeedback } from "../controler/feedback";
+import {
+  deleteFeedback,
+  getAdminFeedback,
+  replyToFeedback,
+  submitFeedback,
+} from "../controler/feedback";
 
 
 const router = express.Router();
@@ -203,6 +208,8 @@ router.get("/me", preventCaching, currentUser);
 router.get("/session-status", preventCaching, sessionStatus);
 router.post("/feedback", submitFeedback);
 router.get("/admin/feedback", getAdminFeedback);
+router.patch("/admin/feedback/:id/reply", replyToFeedback);
+router.delete("/admin/feedback/:id", deleteFeedback);
 
 router.get("/admin/users", adminUsers);
 router.post("/admin/users", createAdminAccount);

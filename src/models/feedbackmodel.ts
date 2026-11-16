@@ -8,6 +8,9 @@ export interface IUserFeedback {
   email: string;
   category: FeedbackCategory;
   message: string;
+  adminReply?: string;
+  repliedAt?: Date;
+  repliedBy?: Types.ObjectId;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -23,6 +26,9 @@ const feedbackSchema = new Schema<IUserFeedback>(
       required: true,
     },
     message: { type: String, required: true, trim: true, maxlength: 3000 },
+    adminReply: { type: String, trim: true, maxlength: 3000 },
+    repliedAt: { type: Date },
+    repliedBy: { type: Schema.Types.ObjectId, ref: "Login" },
   },
   { timestamps: true }
 );
