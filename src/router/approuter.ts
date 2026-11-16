@@ -121,6 +121,7 @@ import {
   getDeviceQuota,
   releaseDeviceQuota,
 } from "../controler/devicequota";
+import { getAdminFeedback, submitFeedback } from "../controler/feedback";
 
 
 const router = express.Router();
@@ -200,6 +201,8 @@ router.post("/logout", logout);
 
 router.get("/me", preventCaching, currentUser);
 router.get("/session-status", preventCaching, sessionStatus);
+router.post("/feedback", submitFeedback);
+router.get("/admin/feedback", getAdminFeedback);
 
 router.get("/admin/users", adminUsers);
 router.post("/admin/users", createAdminAccount);
