@@ -30,31 +30,36 @@ export const submitFeedback = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  const { name, email, category, message } = req.body ?? {};
-  const submittedName = typeof name === "string" ? name.trim() : "";
-  const submittedEmail = typeof email === "string" ? email.trim() : "";
-  const submittedMessage = typeof message === "string" ? message.trim() : "";
-
-  if (
-    typeof name !== "string" ||
-    typeof email !== "string" ||
-    !submittedName ||
-    !submittedEmail ||
-    submittedName.length > 80 ||
-    submittedEmail.length > 254 ||
-    (submittedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submittedEmail)) ||
-    !isFeedbackCategory(category) ||
-    !submittedMessage ||
-    submittedMessage.length > 3000
-  ) {
-    res.status(400).json({ success: false, message: "Please provide valid feedback details." });
-    return;
-  }
-
   try {
     const user = await getSessionUser(req);
+    if (!user) {
+      res.status(401).json({ success: false, message: "Please sign in to submit feedback." });
+      return;
+    }
+
+    const { name, email, category, message } = req.body ?? {};
+    const submittedName = typeof name === "string" ? name.trim() : "";
+    const submittedEmail = typeof email === "string" ? email.trim() : "";
+    const submittedMessage = typeof message === "string" ? message.trim() : "";
+
+    if (
+      typeof name !== "string" ||
+      typeof email !== "string" ||
+      !submittedName ||
+      !submittedEmail ||
+      submittedName.length > 80 ||
+      submittedEmail.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submittedEmail) ||
+      !isFeedbackCategory(category) ||
+      !submittedMessage ||
+      submittedMessage.length > 3000
+    ) {
+      res.status(400).json({ success: false, message: "Please provide valid feedback details." });
+      return;
+    }
+
     const feedback = await Feedback.create({
-      ...(user ? { userId: new Types.ObjectId(user.id) } : {}),
+      userId: new Types.ObjectId(user.id),
       name: submittedName,
       email: submittedEmail.toLowerCase(),
       category,
