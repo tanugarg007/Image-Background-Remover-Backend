@@ -23,8 +23,10 @@ export const submitFeedback = async (
   const submittedMessage = typeof message === "string" ? message.trim() : "";
 
   if (
-    (name !== undefined && typeof name !== "string") ||
-    (email !== undefined && typeof email !== "string") ||
+    typeof name !== "string" ||
+    typeof email !== "string" ||
+    !submittedName ||
+    !submittedEmail ||
     submittedName.length > 80 ||
     submittedEmail.length > 254 ||
     (submittedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submittedEmail)) ||
@@ -40,10 +42,8 @@ export const submitFeedback = async (
     const user = await getSessionUser(req);
     const feedback = await Feedback.create({
       ...(user ? { userId: new Types.ObjectId(user.id) } : {}),
-      ...(user?.name || submittedName ? { name: user?.name || submittedName } : {}),
-      ...(user?.email || submittedEmail
-        ? { email: user?.email || submittedEmail.toLowerCase() }
-        : {}),
+      name: submittedName,
+      email: submittedEmail.toLowerCase(),
       category,
       message: submittedMessage,
     });

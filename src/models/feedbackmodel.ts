@@ -4,8 +4,8 @@ export type FeedbackCategory = "suggestion" | "bug" | "other";
 
 export interface IUserFeedback {
   userId?: Types.ObjectId;
-  name?: string;
-  email?: string;
+  name: string;
+  email: string;
   category: FeedbackCategory;
   message: string;
   createdAt?: Date;
@@ -15,8 +15,8 @@ export interface IUserFeedback {
 const feedbackSchema = new Schema<IUserFeedback>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "Login" },
-    name: { type: String, trim: true, maxlength: 80 },
-    email: { type: String, trim: true, lowercase: true, maxlength: 254 },
+    name: { type: String, required: true, trim: true, maxlength: 80 },
+    email: { type: String, required: true, trim: true, lowercase: true, maxlength: 254 },
     category: {
       type: String,
       enum: ["suggestion", "bug", "other"],
