@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { Types } from "mongoose";
 import Feedback, { type FeedbackCategory, type FeedbackStatus } from "../models/feedbackmodel";
 import { getSessionUser } from "../midleware/sessionuser";
+import { sendFeedbackReplyEmail } from "../config/mailer";
 
 const feedbackCategories: readonly string[] = [
   "suggestion",
@@ -161,7 +162,26 @@ export const replyToFeedback = async (
       return;
     }
 
-    res.status(200).json({ success: true, data: feedback });
+    let emailSent = true;
+    let message = "Reply saved and emailed to the user.";
+    try {
+      await sendFeedbackReplyEmail({
+        to: feedback.email,
+        name: feedback.name,
+        feedbackMessage: feedback.message,
+        reply,
+        status: feedback.status || "pending",
+      });
+    } catch (emailError) {
+      emailSent = false;
+      message = "Reply saved, but the email could not be sent. Check email settings and try again.";
+      console.error(
+        "[Feedback] Reply saved, but email delivery failed:",
+        emailError instanceof Error ? emailError.name : "Unknown error"
+      );
+    }
+
+    res.status(200).json({ success: true, message, emailSent, data: feedback });
   } catch (error) {
     console.error("[Feedback] Could not save reply:", error);
     res.status(500).json({ success: false, message: "Could not save the reply." });
