@@ -77,6 +77,28 @@ export const submitFeedback = async (
   }
 };
 
+export const getMyFeedback = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const user = await getSessionUser(req);
+    if (!user) {
+      res.status(401).json({ success: false, message: "Please sign in." });
+      return;
+    }
+
+    const feedback = await Feedback.find({ userId: new Types.ObjectId(user.id) })
+      .select("_id category message adminReply repliedAt createdAt")
+      .sort({ createdAt: -1 })
+      .lean();
+    res.status(200).json({ success: true, data: feedback });
+  } catch (error) {
+    console.error("[Feedback] Could not load user feedback:", error);
+    res.status(500).json({ success: false, message: "Could not load your feedback." });
+  }
+};
+
 export const getAdminFeedback = async (
   req: Request,
   res: Response

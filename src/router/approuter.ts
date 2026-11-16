@@ -124,6 +124,7 @@ import {
 import {
   deleteFeedback,
   getAdminFeedback,
+  getMyFeedback,
   replyToFeedback,
   submitFeedback,
 } from "../controler/feedback";
@@ -207,6 +208,7 @@ router.post("/logout", logout);
 router.get("/me", preventCaching, currentUser);
 router.get("/session-status", preventCaching, sessionStatus);
 router.post("/feedback", submitFeedback);
+router.get("/my/feedback", getMyFeedback);
 router.get("/admin/feedback", getAdminFeedback);
 router.patch("/admin/feedback/:id/reply", replyToFeedback);
 router.delete("/admin/feedback/:id", deleteFeedback);
