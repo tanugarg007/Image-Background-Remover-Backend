@@ -127,6 +127,7 @@ import {
   getMyFeedback,
   replyToFeedback,
   submitFeedback,
+  updateFeedbackStatus,
 } from "../controler/feedback";
 
 
@@ -211,6 +212,7 @@ router.post("/feedback", submitFeedback);
 router.get("/my/feedback", getMyFeedback);
 router.get("/admin/feedback", getAdminFeedback);
 router.patch("/admin/feedback/:id/reply", replyToFeedback);
+router.patch("/admin/feedback/:id/status", updateFeedbackStatus);
 router.delete("/admin/feedback/:id", deleteFeedback);
 
 router.get("/admin/users", adminUsers);

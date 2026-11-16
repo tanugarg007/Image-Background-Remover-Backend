@@ -1,6 +1,7 @@
 import mongoose, { Schema, Types } from "mongoose";
 
 export type FeedbackCategory = "suggestion" | "bug" | "other";
+export type FeedbackStatus = "pending" | "reviewed" | "resolved";
 
 export interface IUserFeedback {
   userId?: Types.ObjectId;
@@ -8,6 +9,7 @@ export interface IUserFeedback {
   email: string;
   category: FeedbackCategory;
   message: string;
+  status?: FeedbackStatus;
   adminReply?: string;
   repliedAt?: Date;
   repliedBy?: Types.ObjectId;
@@ -26,6 +28,12 @@ const feedbackSchema = new Schema<IUserFeedback>(
       required: true,
     },
     message: { type: String, required: true, trim: true, maxlength: 3000 },
+    status: {
+      type: String,
+      enum: ["pending", "reviewed", "resolved"],
+      default: "pending",
+      required: true,
+    },
     adminReply: { type: String, trim: true, maxlength: 3000 },
     repliedAt: { type: Date },
     repliedBy: { type: Schema.Types.ObjectId, ref: "Login" },

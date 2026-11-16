@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { Types } from "mongoose";
-import Feedback, { type FeedbackCategory } from "../models/feedbackmodel";
+import Feedback, { type FeedbackCategory, type FeedbackStatus } from "../models/feedbackmodel";
 import { getSessionUser } from "../midleware/sessionuser";
 
 const feedbackCategories: readonly string[] = [
@@ -8,9 +8,18 @@ const feedbackCategories: readonly string[] = [
   "bug",
   "other",
 ];
+const feedbackStatuses: readonly string[] = [
+  "pending",
+  "reviewed",
+  "resolved",
+];
 
 function isFeedbackCategory(value: unknown): value is FeedbackCategory {
   return typeof value === "string" && feedbackCategories.includes(value);
+}
+
+function isFeedbackStatus(value: unknown): value is FeedbackStatus {
+  return typeof value === "string" && feedbackStatuses.includes(value);
 }
 
 async function requireSuperadmin(req: Request, res: Response) {
@@ -89,7 +98,7 @@ export const getMyFeedback = async (
     }
 
     const feedback = await Feedback.find({ userId: new Types.ObjectId(user.id) })
-      .select("_id category message adminReply repliedAt createdAt")
+      .select("_id category message status adminReply repliedAt createdAt")
       .sort({ createdAt: -1 })
       .lean();
     res.status(200).json({ success: true, data: feedback });
@@ -156,6 +165,42 @@ export const replyToFeedback = async (
   } catch (error) {
     console.error("[Feedback] Could not save reply:", error);
     res.status(500).json({ success: false, message: "Could not save the reply." });
+  }
+};
+
+export const updateFeedbackStatus = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!(await requireSuperadmin(req, res))) return;
+
+    const feedbackId = req.params.id;
+    if (typeof feedbackId !== "string" || !Types.ObjectId.isValid(feedbackId)) {
+      res.status(400).json({ success: false, message: "Invalid feedback ID." });
+      return;
+    }
+
+    const { status } = req.body ?? {};
+    if (!isFeedbackStatus(status)) {
+      res.status(400).json({ success: false, message: "Please choose a valid feedback status." });
+      return;
+    }
+
+    const feedback = await Feedback.findByIdAndUpdate(
+      feedbackId,
+      { $set: { status } },
+      { new: true, runValidators: true }
+    ).lean();
+    if (!feedback) {
+      res.status(404).json({ success: false, message: "Feedback was not found." });
+      return;
+    }
+
+    res.status(200).json({ success: true, data: feedback });
+  } catch (error) {
+    console.error("[Feedback] Could not update status:", error);
+    res.status(500).json({ success: false, message: "Could not update feedback status." });
   }
 };
 
