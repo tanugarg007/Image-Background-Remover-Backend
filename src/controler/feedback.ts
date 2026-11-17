@@ -153,6 +153,7 @@ export const replyToFeedback = async (
           adminReply: reply,
           repliedAt: new Date(),
           repliedBy: new Types.ObjectId(user.id),
+          status: "reviewed",
         },
       },
       { new: true, runValidators: true }
@@ -206,6 +207,25 @@ export const updateFeedbackStatus = async (
     const { status } = req.body ?? {};
     if (!isFeedbackStatus(status)) {
       res.status(400).json({ success: false, message: "Please choose a valid feedback status." });
+      return;
+    }
+
+    const currentFeedback = await Feedback.findById(feedbackId).select("status adminReply").lean();
+    if (!currentFeedback) {
+      res.status(404).json({ success: false, message: "Feedback was not found." });
+      return;
+    }
+
+    const currentStatus = currentFeedback.status || "pending";
+    const canAdvanceStatus =
+      status === currentStatus ||
+      (currentStatus === "pending" && status === "reviewed" && Boolean(currentFeedback.adminReply)) ||
+      (currentStatus === "reviewed" && status === "resolved" && Boolean(currentFeedback.adminReply));
+    if (!canAdvanceStatus) {
+      res.status(409).json({
+        success: false,
+        message: "Feedback must move from Pending to Reviewed (after a reply), then to Resolved.",
+      });
       return;
     }
 
