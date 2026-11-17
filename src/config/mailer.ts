@@ -45,12 +45,20 @@ export const sendFeedbackReplyEmail = async ({
   const safeFeedback = escapeHtml(feedbackMessage).replace(/\r?\n/g, "<br>");
   const statusLabel = statusLabels[status];
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass: password },
-  });
+ 
+const transporter = nodemailer.createTransport({
+  host,
+  port,
+  secure: port === 465,
+  auth: {
+    user,
+    pass: password,
+  },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 60000,
+});
+
 
   await transporter.sendMail({
     from,
