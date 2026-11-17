@@ -172,14 +172,16 @@ export const replyToFeedback = async (
         reply,
         status: feedback.status || "pending",
       });
-    } catch (emailError) {
-      emailSent = false;
-      message = "Reply saved, but the email could not be sent. Check email settings and try again.";
-      console.error(
-        "[Feedback] Reply saved, but email delivery failed:",
-        emailError instanceof Error ? emailError.name : "Unknown error"
-      );
-    }
+    }catch (emailError: any) {
+  emailSent = false;
+  message = "Reply saved, but the email could not be sent. Check email settings and try again.";
+
+  console.error("[Feedback] Email delivery failed:", emailError);
+  console.error("Error message:", emailError?.message);
+  console.error("Error code:", emailError?.code);
+  console.error("Error response:", emailError?.response);
+  console.error("Error command:", emailError?.command);
+}
 
     res.status(200).json({ success: true, message, emailSent, data: feedback });
   } catch (error) {
