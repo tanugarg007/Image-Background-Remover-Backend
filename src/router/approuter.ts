@@ -7,11 +7,13 @@ import {
   adminUsers,
   createAdminAccount,
   currentUser,
+  facebookLoginCallback,
   deleteAdminAccount,
   login,
   logout,
   register,
   sessionStatus,
+  startFacebookLogin,
   startGoogleLogin,
   googleLoginCallback,
   updateAdminAccount,
@@ -213,6 +215,8 @@ router.post("/register", register);
 router.post("/login", login);
 router.get("/google/login", startGoogleLogin);
 router.get("/google/login/callback", googleLoginCallback);
+router.get("/facebook/login", startFacebookLogin);
+router.get("/facebook/login/callback", facebookLoginCallback);
 router.post("/logout", logout);
 
 router.get("/me", preventCaching, currentUser);

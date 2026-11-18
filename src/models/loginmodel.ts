@@ -23,6 +23,12 @@ const loginSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    facebookId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
     name: {
       type: String,
       trim: true,
