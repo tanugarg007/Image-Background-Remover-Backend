@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { Request, Response } from "express";
 import { Types } from "mongoose";
+import { google } from "googleapis";
 import LoginModel from "../models/loginmodel";
 import RolePermissionConfig, { DEFAULT_ROLE_PERMISSIONS } from "../models/rolepermissionmodel";
 import {
@@ -101,6 +102,154 @@ const createSession = async (
   if (user.sessions.length > 10) user.sessions.splice(0, user.sessions.length - 10);
   await user.save();
   setSessionCookie(res, token, remember);
+};
+
+const GOOGLE_LOGIN_STATE_COOKIE = "pixelcraft_google_login_state";
+const getGoogleLoginClient = () => {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  const configuredRedirect = process.env.GOOGLE_LOGIN_REDIRECT_URI?.trim();
+  const gmailRedirect = process.env.GOOGLE_REDIRECT_URI?.trim();
+  let redirectUri = configuredRedirect;
+
+  if (!redirectUri && gmailRedirect) {
+    const callbackUrl = new URL(gmailRedirect);
+    callbackUrl.pathname = callbackUrl.pathname.replace(/\/google\/callback\/?$/, "/google/login/callback");
+    redirectUri = callbackUrl.toString();
+  }
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error("Google login OAuth settings are missing.");
+  }
+
+  return {
+    clientId,
+    client: new google.auth.OAuth2(clientId, clientSecret, redirectUri),
+  };
+};
+
+const googleLoginCookieOptions = process.env.NODE_ENV === "production"
+  ? "HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600"
+  : "HttpOnly; SameSite=Lax; Path=/; Max-Age=600";
+
+const getGoogleLoginFrontendUrl = (): URL => {
+  const configured = process.env.FRONTEND_URL?.trim();
+  return new URL(configured || (process.env.NODE_ENV === "production"
+    ? "https://image-background-remover-frontend.vercel.app"
+    : "http://localhost:5173"));
+};
+
+const safeGoogleReturnTo = (value: unknown): string => {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return "";
+  try {
+    const target = new URL(value, "https://pixelcraft.invalid");
+    if (target.origin !== "https://pixelcraft.invalid" || target.pathname === "/login") return "";
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "";
+  }
+};
+
+export const startGoogleLogin = (req: Request, res: Response): void => {
+  try {
+    const { client } = getGoogleLoginClient();
+    const state = randomBytes(32).toString("base64url");
+    const context = Buffer.from(JSON.stringify({
+      state,
+      returnTo: safeGoogleReturnTo(req.query.returnTo),
+      popup: req.query.popup === "1",
+    })).toString("base64url");
+
+    res.setHeader("Set-Cookie", `${GOOGLE_LOGIN_STATE_COOKIE}=${context}; ${googleLoginCookieOptions}`);
+    res.redirect(client.generateAuthUrl({
+      access_type: "online",
+      prompt: "select_account",
+      scope: ["openid", "email", "profile"],
+      state,
+    }));
+  } catch (error) {
+    console.error("[Google Login] Could not start OAuth:", error);
+    res.redirect(`${getGoogleLoginFrontendUrl().origin}/login?google=error`);
+  }
+};
+
+export const googleLoginCallback = async (req: Request, res: Response): Promise<void> => {
+  const clearStateCookie = `${GOOGLE_LOGIN_STATE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === "production" ? "; Secure" : ""}`;
+  const frontendUrl = getGoogleLoginFrontendUrl();
+  const fail = (popup = false) => {
+    res.setHeader("Set-Cookie", clearStateCookie);
+    frontendUrl.pathname = "/login";
+    frontendUrl.search = new URLSearchParams({ google: "error", ...(popup ? { popup: "1" } : {}) }).toString();
+    res.redirect(frontendUrl.toString());
+  };
+
+  try {
+    const cookie = req.headers.cookie?.split(";").map((part) => part.trim())
+      .find((part) => part.startsWith(`${GOOGLE_LOGIN_STATE_COOKIE}=`))
+      ?.slice(GOOGLE_LOGIN_STATE_COOKIE.length + 1);
+    let context: { state: string; returnTo: string; popup: boolean } | undefined;
+    try {
+      if (cookie) context = JSON.parse(Buffer.from(decodeURIComponent(cookie), "base64url").toString("utf8"));
+    } catch {
+      context = undefined;
+    }
+
+    const returnedState = typeof req.query.state === "string" ? req.query.state : "";
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    if (!context?.state || !returnedState || !code || context.state.length !== returnedState.length ||
+      !timingSafeEqual(Buffer.from(context.state), Buffer.from(returnedState))) {
+      fail(context?.popup === true);
+      return;
+    }
+
+    res.setHeader("Set-Cookie", clearStateCookie);
+    const { client, clientId } = getGoogleLoginClient();
+    const { tokens } = await client.getToken(code);
+    if (!tokens.id_token) {
+      fail(context.popup);
+      return;
+    }
+    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: clientId });
+    const profile = ticket.getPayload();
+    if (!profile?.email || profile.email_verified !== true) {
+      fail(context.popup);
+      return;
+    }
+
+    const email = profile.email.trim().toLowerCase();
+    let user = await LoginModel.findOne({ email });
+    if (!user) {
+      if (email === SUPERADMIN_EMAIL) {
+        fail(context.popup);
+        return;
+      }
+      const passwordSalt = randomBytes(16).toString("hex");
+      const passwordHash = (await derivePasswordHash(randomBytes(48).toString("hex"), passwordSalt)).toString("hex");
+      user = await LoginModel.create({
+        email,
+        name: (profile.name || email).slice(0, 80),
+        passwordSalt,
+        passwordHash,
+      });
+    }
+
+    if (user.status === "disabled" || !isValidSuperadminIdentity(email, user.role || "user")) {
+      fail(context.popup);
+      return;
+    }
+
+    await createSession(user._id, res, true);
+    res.append("Set-Cookie", clearStateCookie);
+    frontendUrl.pathname = "/login";
+    const params = new URLSearchParams({ google: "success" });
+    if (context.returnTo) params.set("returnTo", context.returnTo);
+    if (context.popup) params.set("popup", "1");
+    frontendUrl.search = params.toString();
+    res.redirect(frontendUrl.toString());
+  } catch (error) {
+    console.error("[Google Login] OAuth callback failed:", error);
+    fail();
+  }
 };
 
 const userResponse = (user: { _id: unknown; email: string; name?: string | null; role?: string }) => ({

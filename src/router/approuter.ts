@@ -12,6 +12,8 @@ import {
   logout,
   register,
   sessionStatus,
+  startGoogleLogin,
+  googleLoginCallback,
   updateAdminAccount,
 } from "../controler/login";
 
@@ -209,6 +211,8 @@ router.get("/", (_req, res) => {
 
 router.post("/register", register);
 router.post("/login", login);
+router.get("/google/login", startGoogleLogin);
+router.get("/google/login/callback", googleLoginCallback);
 router.post("/logout", logout);
 
 router.get("/me", preventCaching, currentUser);
