@@ -131,6 +131,11 @@ import {
 } from "../controler/feedback";
 
 
+import {
+  connectGmail,
+  gmailOAuthCallback,
+} from "../controler/gmailOAuthController";
+
 const router = express.Router();
 
 
@@ -435,5 +440,8 @@ router.patch("/admin/imagetools/:id", updateImageTool);
 router.patch("/admin/imagetools/:id/status", updateImageToolStatus);
 router.delete("/admin/imagetools/:id", deleteImageTool);
 
+
+router.get("/google/connect", connectGmail);
+router.get("/google/callback", gmailOAuthCallback);
 
 export default router;
