@@ -63,8 +63,10 @@ const cookieOptions =
 const requireSuperadmin = async (
   req: Request
 ): Promise<boolean> => {
+    console.log("[GMAIL CHECK] requireSuperadmin started");
   const token = readCookie(req, SESSION_COOKIE);
 
+  console.log("[GMAIL CHECK] Cookie received:", Boolean(token));
   if (!token) return false;
 
   const tokenHash = createHash("sha256")
