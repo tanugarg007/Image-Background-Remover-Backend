@@ -20,13 +20,19 @@ function readCookie(req: Request, name: string): string | null {
 
 function getOrSetDeviceId(req: Request, res: Response): string {
   const existing = readCookie(req, DEVICE_COOKIE);
-  if (existing && DEVICE_ID_PATTERN.test(existing)) return existing.toLowerCase();
   const headerDeviceId = req.get("X-Guest-Device");
+  // The frontend ID is scoped to its origin's localStorage. Prefer it over
+  // the cookie because localhost cookies are shared across ports, which can
+  // otherwise make one local app inherit another app's exhausted quota.
   const deviceId = headerDeviceId && DEVICE_ID_PATTERN.test(headerDeviceId)
     ? headerDeviceId.toLowerCase()
-    : randomUUID();
+    : existing && DEVICE_ID_PATTERN.test(existing)
+      ? existing.toLowerCase()
+      : randomUUID();
   const secure = req.secure ? "; Secure" : "";
-  res.append("Set-Cookie", `${DEVICE_COOKIE}=${encodeURIComponent(deviceId)}; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax${secure}`);
+  if (!existing || existing.toLowerCase() !== deviceId) {
+    res.append("Set-Cookie", `${DEVICE_COOKIE}=${encodeURIComponent(deviceId)}; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax${secure}`);
+  }
   return deviceId;
 }
 
