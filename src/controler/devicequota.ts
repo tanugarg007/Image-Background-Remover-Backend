@@ -36,15 +36,15 @@ async function getOrCreateQuota(deviceId: string) {
     const quota = await DeviceQuota.findById(identity.quotaId);
     if (quota) {
       // Older deployments may have linked several browser IDs to one quota.
-      // Keep it shared until active reservations finish, then split it.
+      // Never let one browser inherit another browser's usage or reservations.
       const otherDevices = await DeviceIdentity.countDocuments({
         quotaId: quota._id,
         deviceId: { $ne: deviceId },
       });
       if (otherDevices === 0) return quota;
-      if (quota.pendingReservations.length > 0) return quota;
 
-      // Usage from a shared legacy quota cannot be attributed to one browser.
+      // Legacy shared usage and reservations cannot be attributed to a browser.
+      // Give this identity a clean quota so a first visit gets the full limit.
       const detachedQuota = await DeviceQuota.create({ downloadsUsed: 0 });
       const detached = await DeviceIdentity.updateOne(
         { _id: identity._id, quotaId: quota._id },
