@@ -4,7 +4,14 @@ import cors from "cors";
 import { exit } from "node:process";
 import Router from "./router/approuter";
 import { connectDB } from "./config/db";
-
+import dotenv from "dotenv";
+dotenv.config();
+console.log("[FACEBOOK ENV CHECK]", {
+  appId: Boolean(process.env.FACEBOOK_APP_ID?.trim()),
+  appSecret: Boolean(process.env.FACEBOOK_APP_SECRET?.trim()),
+  redirectUri: Boolean(process.env.FACEBOOK_LOGIN_REDIRECT_URI?.trim()),
+  envFileLocation: process.cwd(),
+});
 const app = express();
 app.set("trust proxy", 1);
 

@@ -266,8 +266,12 @@ const facebookStateCookieOptions = process.env.NODE_ENV === "production"
   : "HttpOnly; SameSite=Lax; Path=/; Max-Age=600";
 
 export const startFacebookLogin = (req: Request, res: Response): void => {
+  console.log("[FACEBOOK LOGIN] Handler reached");
   try {
     const config = getFacebookLoginConfig();
+    console.log("[FACEBOOK LOGIN] Config loaded successfully");
+console.log("[FACEBOOK LOGIN] Redirect URI:", config.redirectUri);
+console.log("[FACEBOOK LOGIN] Graph version:", config.graphVersion);
     const state = randomBytes(32).toString("base64url");
     const context = Buffer.from(JSON.stringify({
       state,
@@ -276,92 +280,201 @@ export const startFacebookLogin = (req: Request, res: Response): void => {
     })).toString("base64url");
     res.setHeader("Set-Cookie", `${FACEBOOK_STATE_COOKIE}=${context}; ${facebookStateCookieOptions}`);
 
-    const authorization = new URL(`https://www.facebook.com/${config.graphVersion}/dialog/oauth`);
-    authorization.search = new URLSearchParams({
-      client_id: config.appId,
-      redirect_uri: config.redirectUri,
-      state,
-      scope: "email,public_profile",
-      response_type: "code",
-    }).toString();
+  const authorization = new URL(`https://www.facebook.com/${config.graphVersion}/dialog/oauth`);
+
+authorization.search = new URLSearchParams({
+  client_id: config.appId,
+  redirect_uri: config.redirectUri,
+  state,
+  scope: "email,public_profile",
+  response_type: "code",
+  auth_type: "reauthenticate",
+}).toString();
+    console.log("[FACEBOOK LOGIN] Authorization URL created");
+console.log("[FACEBOOK LOGIN] Redirecting to Facebook...");
     res.redirect(authorization.toString());
-  } catch (error) {
-    console.error("[Facebook Login] Could not start OAuth:", error);
-    res.redirect(`${getGoogleLoginFrontendUrl().origin}/login?facebook=error`);
-  }
+  }  catch (error) {
+  console.error("[FACEBOOK LOGIN] ACTUAL ERROR:", error);
+  console.error("[FACEBOOK LOGIN] ERROR MESSAGE:", error instanceof Error ? error.message : error);
+  console.error("[FACEBOOK LOGIN] ERROR STACK:", error instanceof Error ? error.stack : "No stack");
+
+  res.redirect(`${getGoogleLoginFrontendUrl().origin}/login?facebook=error`);
+}
 };
 
-export const facebookLoginCallback = async (req: Request, res: Response): Promise<void> => {
-  const clearStateCookie = `${FACEBOOK_STATE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === "production" ? "; Secure" : ""}`;
+
+export const facebookLoginCallback = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const clearStateCookie = `${FACEBOOK_STATE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${
+    process.env.NODE_ENV === "production" ? "; Secure" : ""
+  }`;
+
   const frontendUrl = getGoogleLoginFrontendUrl();
-  const fail = (popup = false) => {
+
+  const fail = (reason: string, popup = false): void => {
+    console.error("[FACEBOOK CALLBACK] Failed:", reason);
+
     res.setHeader("Set-Cookie", clearStateCookie);
     frontendUrl.pathname = "/login";
-    frontendUrl.search = new URLSearchParams({ facebook: "error", ...(popup ? { popup: "1" } : {}) }).toString();
+    frontendUrl.search = new URLSearchParams({
+      facebook: "error",
+      ...(popup ? { popup: "1" } : {}),
+    }).toString();
+
     res.redirect(frontendUrl.toString());
   };
 
   try {
-    const cookie = req.headers.cookie?.split(";").map((part) => part.trim())
+    // 1. Read Facebook state cookie
+    const cookie = req.headers.cookie
+      ?.split(";")
+      .map((part) => part.trim())
       .find((part) => part.startsWith(`${FACEBOOK_STATE_COOKIE}=`))
       ?.slice(FACEBOOK_STATE_COOKIE.length + 1);
-    let context: { state: string; returnTo: string; popup: boolean } | undefined;
+
+    let context:
+      | { state: string; returnTo: string; popup: boolean }
+      | undefined;
+
     try {
-      if (cookie) context = JSON.parse(Buffer.from(decodeURIComponent(cookie), "base64url").toString("utf8"));
+      if (cookie) {
+        context = JSON.parse(
+          Buffer.from(
+            decodeURIComponent(cookie),
+            "base64url"
+          ).toString("utf8")
+        );
+      }
     } catch {
       context = undefined;
     }
 
-    const returnedState = typeof req.query.state === "string" ? req.query.state : "";
-    const code = typeof req.query.code === "string" ? req.query.code : "";
-    if (!context?.state || !returnedState || !code || context.state.length !== returnedState.length ||
-      !timingSafeEqual(Buffer.from(context.state), Buffer.from(returnedState))) {
-      fail(context?.popup === true);
+    // 2. Validate state and authorization code
+    const returnedState =
+      typeof req.query.state === "string" ? req.query.state : "";
+
+    const code =
+      typeof req.query.code === "string" ? req.query.code : "";
+
+    if (
+      !context?.state ||
+      !returnedState ||
+      !code ||
+      context.state.length !== returnedState.length ||
+      !timingSafeEqual(
+        Buffer.from(context.state),
+        Buffer.from(returnedState)
+      )
+    ) {
+      fail("State validation failed or authorization code missing.", context?.popup === true);
       return;
     }
 
+    console.log("[FACEBOOK CALLBACK] State validation passed");
+
     const config = getFacebookLoginConfig();
-    const tokenUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/oauth/access_token`);
+
+    // 3. Exchange authorization code for access token
+    const tokenUrl = new URL(
+      `https://graph.facebook.com/${config.graphVersion}/oauth/access_token`
+    );
+
     tokenUrl.search = new URLSearchParams({
       client_id: config.appId,
       client_secret: config.appSecret,
       redirect_uri: config.redirectUri,
       code,
     }).toString();
+
     const tokenResponse = await fetch(tokenUrl);
-    const tokenData = await tokenResponse.json() as { access_token?: string };
+
+    const tokenData = await tokenResponse.json() as {
+      access_token?: string;
+      error?: { message?: string; type?: string; code?: number };
+    };
+
+    console.log("[FACEBOOK CALLBACK] Token response:", {
+      status: tokenResponse.status,
+      success: tokenResponse.ok,
+      hasAccessToken: Boolean(tokenData.access_token),
+      error: tokenData.error?.message,
+    });
+
     if (!tokenResponse.ok || !tokenData.access_token) {
-      fail(context.popup);
+      fail("Facebook access token exchange failed.", context.popup);
       return;
     }
 
-    const profileUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/me`);
+    // 4. Fetch Facebook profile
+    const profileUrl = new URL(
+      `https://graph.facebook.com/${config.graphVersion}/me`
+    );
+
     profileUrl.search = new URLSearchParams({
       fields: "id,name,email",
       access_token: tokenData.access_token,
     }).toString();
+
     const profileResponse = await fetch(profileUrl);
-    const profile = await profileResponse.json() as { id?: string; name?: string; email?: string };
-    if (!profileResponse.ok || !profile.id || !profile.email) {
-      fail(context.popup);
+
+    const profile = await profileResponse.json() as {
+      id?: string;
+      name?: string;
+      email?: string;
+      error?: { message?: string };
+    };
+
+    console.log("[FACEBOOK CALLBACK] Profile response:", {
+      status: profileResponse.status,
+      success: profileResponse.ok,
+      hasId: Boolean(profile.id),
+      hasName: Boolean(profile.name),
+      hasEmail: Boolean(profile.email),
+      error: profile.error?.message,
+    });
+
+    if (
+      !profileResponse.ok ||
+      !profile.id ||
+      !profile.email ||
+      !isValidEmail(profile.email)
+    ) {
+      fail("Facebook profile is missing a valid email or ID.", context.popup);
       return;
     }
 
+    // 5. Find or create account
     const email = profile.email.trim().toLowerCase();
-    let user = await LoginModel.findOne({ facebookId: profile.id });
+
+    let user = await LoginModel.findOne({
+      facebookId: profile.id,
+    });
+
     if (!user) {
       user = await LoginModel.findOne({ email });
+
       if (user && user.facebookId && user.facebookId !== profile.id) {
-        fail(context.popup);
+        fail("This email is linked to another Facebook account.", context.popup);
         return;
       }
+
       if (!user) {
         if (email === SUPERADMIN_EMAIL) {
-          fail(context.popup);
+          fail("Superadmin account cannot be created using Facebook login.", context.popup);
           return;
         }
+
         const passwordSalt = randomBytes(16).toString("hex");
-        const passwordHash = (await derivePasswordHash(randomBytes(48).toString("hex"), passwordSalt)).toString("hex");
+
+        const passwordHash = (
+          await derivePasswordHash(
+            randomBytes(48).toString("hex"),
+            passwordSalt
+          )
+        ).toString("hex");
+
         user = await LoginModel.create({
           facebookId: profile.id,
           email,
@@ -369,30 +482,58 @@ export const facebookLoginCallback = async (req: Request, res: Response): Promis
           passwordSalt,
           passwordHash,
         });
+
+        console.log("[FACEBOOK CALLBACK] New account created");
       } else {
         user.facebookId = profile.id;
         await user.save();
+
+        console.log("[FACEBOOK CALLBACK] Facebook account linked");
       }
     }
 
-    if (user.status === "disabled" || !isValidSuperadminIdentity(email, user.role || "user")) {
-      fail(context.popup);
+    // 6. Check account status and role
+    if (
+      user.status === "disabled" ||
+      !isValidSuperadminIdentity(email, user.role || "user")
+    ) {
+      fail("Account is disabled or account role is invalid.", context.popup);
       return;
     }
 
+    // 7. Create login session
     await createSession(user._id, res, true);
+
     res.append("Set-Cookie", clearStateCookie);
-    frontendUrl.pathname = "/login";
-    const params = new URLSearchParams({ facebook: "success" });
-    if (context.returnTo) params.set("returnTo", context.returnTo);
-    if (context.popup) params.set("popup", "1");
-    frontendUrl.search = params.toString();
+
+    console.log("[FACEBOOK CALLBACK] Session created successfully");
+
+    // 8. Redirect back to frontend
+    frontendUrl.pathname = context.returnTo || "/login";
+
+    const params = new URLSearchParams({
+      facebook: "success",
+    });
+
+    if (context.returnTo) {
+      frontendUrl.search = params.toString();
+      frontendUrl.searchParams.set("returnTo", context.returnTo);
+    } else {
+      frontendUrl.search = params.toString();
+    }
+
+    if (context.popup) {
+      frontendUrl.searchParams.set("popup", "1");
+    }
+
     res.redirect(frontendUrl.toString());
+
   } catch (error) {
-    console.error("[Facebook Login] OAuth callback failed:", error);
-    fail();
+    console.error("[FACEBOOK CALLBACK] OAuth callback failed:", error);
+    fail("Unexpected server error.");
   }
 };
+
 
 const userResponse = (user: { _id: unknown; email: string; name?: string | null; role?: string }) => ({
   id: String(user._id),
@@ -466,7 +607,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     if (value.resetAt <= now) loginFailures.delete(key);
   }
   const attempts = loginFailures.get(clientKey);
-  if (attempts && attempts.resetAt > now && attempts.count >= MAX_LOGIN_FAILURES) {
+  const isLocalDevelopment = process.env.NODE_ENV !== "production"
+    && ["localhost", "127.0.0.1", "::1"].includes(req.hostname);
+  if (!isLocalDevelopment && attempts && attempts.resetAt > now && attempts.count >= MAX_LOGIN_FAILURES) {
     res.setHeader("Retry-After", String(Math.ceil((attempts.resetAt - now) / 1000)));
     res.status(429).json({ success: false, message: "Too many attempts. Please try again later." });
     return;
