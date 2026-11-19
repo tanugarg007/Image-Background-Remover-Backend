@@ -105,6 +105,22 @@ async function getGuestQuota(req: Request, res: Response) {
   }
 
   quota = (await DeviceQuota.findById(quota._id)) || quota;
+
+  // Repair untouched browser quotas that were persisted with zero remaining
+  // (for example by an older deployment). A quota with a completed download
+  // or an active reservation must keep its current balance. The filter makes
+  // this safe if a reservation is created while the repair is running.
+  if (quota.downloadsUsed === 0 && quota.pendingReservations.length === 0 && quota.remainingDownloads !== FREE_LIMIT) {
+    await DeviceQuota.updateOne(
+      {
+        _id: quota._id,
+        downloadsUsed: 0,
+        pendingReservations: { $size: 0 },
+      },
+      { $set: { remainingDownloads: FREE_LIMIT } }
+    );
+    quota = (await DeviceQuota.findById(quota._id)) || quota;
+  }
   return quota;
 }
 
