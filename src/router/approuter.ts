@@ -17,6 +17,8 @@ import {
   startGoogleLogin,
   googleLoginCallback,
   updateAdminAccount,
+   startAppleLogin,
+  appleLoginCallback,
 } from "../controler/login";
 
 // Controllers - Image Background Remover
@@ -139,6 +141,7 @@ import {
   connectGmail,
   gmailOAuthCallback,
 } from "../controler/gmailOAuthController";
+
 
 const router = express.Router();
 
@@ -451,5 +454,13 @@ router.delete("/admin/imagetools/:id", deleteImageTool);
 
 router.get("/google/connect", connectGmail);
 router.get("/google/callback", gmailOAuthCallback);
+
+router.get("/apple/login", startAppleLogin);
+
+router.post(
+  "/apple/login/callback",
+  express.urlencoded({ extended: false }),
+  appleLoginCallback
+);
 
 export default router;

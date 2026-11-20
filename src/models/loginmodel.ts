@@ -29,6 +29,12 @@ const loginSchema = new mongoose.Schema(
       sparse: true,
       trim: true,
     },
+    appleId: {
+  type: String,
+  unique: true,
+  sparse: true,
+  trim: true,
+},
     name: {
       type: String,
       trim: true,

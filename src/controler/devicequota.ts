@@ -51,7 +51,10 @@ async function getOrCreateQuota(deviceId: string) {
 
       // Legacy shared usage and reservations cannot be attributed to a browser.
       // Give this identity a clean quota so a first visit gets the full limit.
-      const detachedQuota = await DeviceQuota.create({ downloadsUsed: 0 });
+      const detachedQuota = await DeviceQuota.create({
+        downloadsUsed: 0,
+        remainingDownloads: FREE_LIMIT,
+      });
       const detached = await DeviceIdentity.updateOne(
         { _id: identity._id, quotaId: quota._id },
         { $set: { quotaId: detachedQuota._id } }
@@ -70,7 +73,13 @@ async function getOrCreateQuota(deviceId: string) {
   }
 
   // Every new browser cookie gets its own quota, regardless of network/IP.
-  const quota = await DeviceQuota.create({ downloadsUsed: 0 });
+  // Initialize the full balance in the same write as the new identity. This
+  // avoids a newly opened browser briefly reading an empty/zero balance while
+  // the legacy-balance reconciliation runs below.
+  const quota = await DeviceQuota.create({
+    downloadsUsed: 0,
+    remainingDownloads: FREE_LIMIT,
+  });
   try {
     await DeviceIdentity.create({ deviceId, quotaId: quota._id });
     return quota;

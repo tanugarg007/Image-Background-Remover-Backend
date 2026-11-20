@@ -252,6 +252,346 @@ export const googleLoginCallback = async (req: Request, res: Response): Promise<
   }
 };
 
+const APPLE_STATE_COOKIE = "pixelcraft_apple_login_state";
+
+const getAppleLoginConfig = () => {
+  const clientId = process.env.APPLE_CLIENT_ID?.trim();
+  const teamId = process.env.APPLE_TEAM_ID?.trim();
+  const keyId = process.env.APPLE_KEY_ID?.trim();
+  const privateKey = process.env.APPLE_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+  const redirectUri = process.env.APPLE_LOGIN_REDIRECT_URI?.trim();
+
+  if (!clientId || !teamId || !keyId || !privateKey || !redirectUri) {
+    throw new Error("Apple login OAuth settings are missing.");
+  }
+
+  return { clientId, teamId, keyId, privateKey, redirectUri };
+};
+
+const appleStateCookieOptions =
+  process.env.NODE_ENV === "production"
+    ? "HttpOnly; Secure; SameSite=None; Path=/; Max-Age=600"
+    : "HttpOnly; SameSite=Lax; Path=/; Max-Age=600";
+
+const getAppleClientSecret = async (
+  config: ReturnType<typeof getAppleLoginConfig>
+): Promise<string> => {
+  const { SignJWT, importPKCS8 } = await import("jose");
+
+  const privateKey = await importPKCS8(config.privateKey, "ES256");
+
+  return new SignJWT({})
+    .setProtectedHeader({ alg: "ES256", kid: config.keyId })
+    .setIssuer(config.teamId)
+    .setSubject(config.clientId)
+    .setAudience("https://appleid.apple.com")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(privateKey);
+};
+
+export const startAppleLogin = (req: Request, res: Response): void => {
+  try {
+    const config = getAppleLoginConfig();
+
+    const state = randomBytes(32).toString("base64url");
+    const nonce = randomBytes(32).toString("base64url");
+
+    const context = Buffer.from(
+      JSON.stringify({
+        state,
+        nonce,
+        returnTo: safeGoogleReturnTo(req.query.returnTo),
+        popup: req.query.popup === "1",
+      })
+    ).toString("base64url");
+
+    res.setHeader(
+      "Set-Cookie",
+      `${APPLE_STATE_COOKIE}=${context}; ${appleStateCookieOptions}`
+    );
+
+    const authorizationUrl = new URL(
+      "https://appleid.apple.com/auth/authorize"
+    );
+
+    authorizationUrl.search = new URLSearchParams({
+      client_id: config.clientId,
+      redirect_uri: config.redirectUri,
+      response_type: "code",
+      response_mode: "form_post",
+      scope: "name email",
+      state,
+      nonce,
+    }).toString();
+
+    res.redirect(authorizationUrl.toString());
+  } catch (error) {
+    console.error("[Apple Login] Could not start OAuth:", error);
+    res.redirect(`${getGoogleLoginFrontendUrl().origin}/login?apple=error`);
+  }
+};
+
+export const appleLoginCallback = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const secureCookie =
+    process.env.NODE_ENV === "production" ? "; Secure" : "";
+
+  const clearStateCookie =
+    `${APPLE_STATE_COOKIE}=; HttpOnly; SameSite=None; Path=/; Max-Age=0${secureCookie}`;
+
+  const frontendUrl = getGoogleLoginFrontendUrl();
+
+  let popup = false;
+
+  const fail = (): void => {
+    res.setHeader("Set-Cookie", clearStateCookie);
+    frontendUrl.pathname = "/login";
+    frontendUrl.search = new URLSearchParams({
+      apple: "error",
+      ...(popup ? { popup: "1" } : {}),
+    }).toString();
+
+    res.redirect(frontendUrl.toString());
+  };
+
+  try {
+    const cookie = req.headers.cookie
+      ?.split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${APPLE_STATE_COOKIE}=`))
+      ?.slice(APPLE_STATE_COOKIE.length + 1);
+
+    let context:
+      | {
+          state: string;
+          nonce: string;
+          returnTo: string;
+          popup: boolean;
+        }
+      | undefined;
+
+    try {
+      if (cookie) {
+        context = JSON.parse(
+          Buffer.from(
+            decodeURIComponent(cookie),
+            "base64url"
+          ).toString("utf8")
+        );
+      }
+    } catch {
+      context = undefined;
+    }
+
+    popup = context?.popup === true;
+
+    const body = req.body as {
+      state?: unknown;
+      code?: unknown;
+      error?: unknown;
+      user?: unknown;
+    };
+
+    const returnedState =
+      typeof body.state === "string" ? body.state : "";
+
+    const code =
+      typeof body.code === "string" ? body.code : "";
+
+    if (
+      !context?.state ||
+      !context.nonce ||
+      !returnedState ||
+      !code ||
+      context.state.length !== returnedState.length ||
+      !timingSafeEqual(
+        Buffer.from(context.state),
+        Buffer.from(returnedState)
+      )
+    ) {
+      console.error("[Apple Login] State validation failed:", body.error);
+      fail();
+      return;
+    }
+
+    const config = getAppleLoginConfig();
+    const clientSecret = await getAppleClientSecret(config);
+
+    // Exchange Apple authorization code for tokens.
+    const tokenResponse = await fetch(
+      "https://appleid.apple.com/auth/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          client_id: config.clientId,
+          client_secret: clientSecret,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: config.redirectUri,
+        }),
+      }
+    );
+
+    const tokenData = await tokenResponse.json() as {
+      id_token?: string;
+      error?: string;
+    };
+
+    if (!tokenResponse.ok || !tokenData.id_token) {
+      console.error("[Apple Login] Token exchange failed:", tokenData.error);
+      fail();
+      return;
+    }
+
+    // Verify Apple's ID token signature and claims.
+    const { createRemoteJWKSet, jwtVerify } = await import("jose");
+
+    const appleKeys = createRemoteJWKSet(
+      new URL("https://appleid.apple.com/auth/keys")
+    );
+
+    const { payload } = await jwtVerify(tokenData.id_token, appleKeys, {
+      issuer: "https://appleid.apple.com",
+      audience: config.clientId,
+    });
+
+    if (
+      typeof payload.sub !== "string" ||
+      payload.sub.length === 0 ||
+      payload.nonce !== context.nonce
+    ) {
+      console.error("[Apple Login] Invalid Apple identity or nonce.");
+      fail();
+      return;
+    }
+
+    const appleId = payload.sub;
+
+    const appleEmail =
+      typeof payload.email === "string"
+        ? payload.email.trim().toLowerCase()
+        : "";
+
+    const emailVerified =
+      payload.email_verified === true ||
+      payload.email_verified === "true";
+
+    // Find an existing Apple-linked account first.
+    let user = await LoginModel.findOne({ appleId });
+
+    if (!user) {
+      if (!isValidEmail(appleEmail) || !emailVerified) {
+        console.error("[Apple Login] Verified email is missing.");
+        fail();
+        return;
+      }
+
+      if (appleEmail === SUPERADMIN_EMAIL) {
+        console.error("[Apple Login] Superadmin cannot be created through Apple.");
+        fail();
+        return;
+      }
+
+      // Link Apple to an existing account with the same verified email,
+      // or create a new account.
+      user = await LoginModel.findOne({ email: appleEmail });
+
+      if (user) {
+        if (user.appleId && user.appleId !== appleId) {
+          console.error("[Apple Login] Email linked to another Apple account.");
+          fail();
+          return;
+        }
+
+        user.appleId = appleId;
+        await user.save();
+      } else {
+        const passwordSalt = randomBytes(16).toString("hex");
+
+        const passwordHash = (
+          await derivePasswordHash(
+            randomBytes(48).toString("hex"),
+            passwordSalt
+          )
+        ).toString("hex");
+
+        let appleName = "";
+
+        if (typeof body.user === "string") {
+          try {
+            const appleUser = JSON.parse(body.user) as {
+              name?: {
+                firstName?: string;
+                lastName?: string;
+              };
+            };
+
+            appleName = [
+              appleUser.name?.firstName,
+              appleUser.name?.lastName,
+            ]
+              .filter((part): part is string =>
+                typeof part === "string" && part.trim().length > 0
+              )
+              .join(" ")
+              .trim();
+          } catch {
+            appleName = "";
+          }
+        }
+
+        user = await LoginModel.create({
+          appleId,
+          email: appleEmail,
+          name: (appleName || appleEmail).slice(0, 80),
+          passwordSalt,
+          passwordHash,
+        });
+      }
+    }
+
+    if (
+      user.status === "disabled" ||
+      !isValidSuperadminIdentity(user.email, user.role || "user")
+    ) {
+      fail();
+      return;
+    }
+
+    // Create the same session used by email, Google and Facebook login.
+    await createSession(user._id, res, true);
+
+    res.append("Set-Cookie", clearStateCookie);
+
+    frontendUrl.pathname = context.returnTo || "/login";
+
+    const params = new URLSearchParams({
+      apple: "success",
+    });
+
+    if (context.returnTo) {
+      params.set("returnTo", context.returnTo);
+    }
+
+    if (context.popup) {
+      params.set("popup", "1");
+    }
+
+    frontendUrl.search = params.toString();
+
+    res.redirect(frontendUrl.toString());
+  } catch (error) {
+    console.error("[Apple Login] OAuth callback failed:", error);
+    fail();
+  }
+};
+
 const FACEBOOK_STATE_COOKIE = "pixelcraft_facebook_login_state";
 const getFacebookLoginConfig = () => {
   const appId = process.env.FACEBOOK_APP_ID?.trim();
